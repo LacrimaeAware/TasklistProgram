@@ -2,6 +2,34 @@ import re
 from datetime import datetime, date, timedelta
 from typing import Optional
 
+WEEKDAY_MAP = {
+    "mon": 0,
+    "monday": 0,
+    "tue": 1,
+    "tues": 1,
+    "tuesday": 1,
+    "wed": 2,
+    "weds": 2,
+    "wednesday": 2,
+    "thu": 3,
+    "thur": 3,
+    "thurs": 3,
+    "thursday": 3,
+    "fri": 4,
+    "friday": 4,
+    "sat": 5,
+    "saturday": 5,
+    "sun": 6,
+    "sunday": 6,
+}
+
+DAYPART_MAP = {
+    "morning": (8, 0),
+    "noon": (12, 0),
+    "afternoon": (16, 0),
+    "evening": (20, 0),
+}
+
 def _end_of_day(dt: datetime) -> datetime:
     return dt.replace(hour=23, minute=59, second=0, microsecond=0)
 
@@ -36,6 +64,40 @@ def parse_due_flexible(s: Optional[str]):
     if s.lower() == "midnight":
         now = datetime.now()
         return now.replace(hour=23, minute=59, second=0, microsecond=0)
+
+    # Plain dayparts -> today at a sensible time
+    if s.lower() in DAYPART_MAP:
+        now = datetime.now()
+        hh, mm = DAYPART_MAP[s.lower()]
+        return now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+
+    # Weekday names with optional time or daypart
+    tokens = s.split()
+    if tokens:
+        day_key = tokens[0].lower()
+        if day_key in WEEKDAY_MAP:
+            today = date.today()
+            target = WEEKDAY_MAP[day_key]
+            days_ahead = (target - today.weekday()) % 7
+            target_date = today + timedelta(days=days_ahead)
+            if len(tokens) == 1:
+                return ("dateonly", datetime.combine(target_date, datetime.min.time()))
+            tail = " ".join(tokens[1:]).strip().lower()
+            if tail == "midnight":
+                return datetime.combine(target_date, datetime.min.time()).replace(hour=23, minute=59)
+            if tail in DAYPART_MAP:
+                hh, mm = DAYPART_MAP[tail]
+                return datetime.combine(target_date, datetime.min.time()).replace(hour=hh, minute=mm)
+            m_time = re.match(r'^(\d{1,2}):(\d{2})$', tail) or re.match(r'^(\d{3,4})$', tail)
+            if m_time:
+                if ":" in tail:
+                    hh, mm = int(m_time.group(1)), int(m_time.group(2))
+                else:
+                    raw = m_time.group(1)
+                    if len(raw) == 3:
+                        raw = "0" + raw
+                    hh, mm = int(raw[:2]), int(raw[2:])
+                return datetime.combine(target_date, datetime.min.time()).replace(hour=hh, minute=mm)
 
     # Absolute YYYY-MM-DD with optional time or 'midnight'
     m = re.match(r'^(\d{4}-\d{2}-\d{2})(?:\s+(\d{2})(?::?(\d{2}))|\s+midnight)?$', s, re.IGNORECASE)

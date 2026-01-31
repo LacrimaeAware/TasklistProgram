@@ -10,4 +10,4 @@ if (Test-Path .\requirements.txt) {
   & $py -m pip install -r requirements.txt | Out-Null
 }
 
-& $py .\app.py
+& $py -m tasklistprogram
