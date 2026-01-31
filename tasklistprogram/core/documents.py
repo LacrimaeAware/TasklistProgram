@@ -6,15 +6,16 @@ import subprocess
 import sys
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-TASKS_DIR = ROOT_DIR / "tasks"
-JOURNALS_DIR = ROOT_DIR / "journals"
+DATA_DIR = ROOT_DIR / "data"
+TASKS_DIR = DATA_DIR / "task_documents"
+JOURNALS_DIR = DATA_DIR / "journals"
 
 TASK_DIVIDER = "\n---\n"
 JOURNAL_DIVIDER = "\n---\n"
 
 def _safe_name(value: str, fallback: str) -> str:
-    cleaned = re.sub(r'[<>:"/\\\\|?*\\n\\r\\t]+', "_", value or "").strip()
-    cleaned = re.sub(r"\\s+", " ", cleaned)
+    cleaned = re.sub(r'[<>:"/\\|?*\n\r\t]+', "_", value or "").strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned or fallback
 
 def task_doc_path(task: dict) -> Path:

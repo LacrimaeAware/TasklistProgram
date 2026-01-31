@@ -2,6 +2,18 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from ..core.dates import parse_due_flexible, fmt_due_for_store
 
+def _place_window(window: tk.Toplevel, parent: tk.Misc | None = None) -> None:
+    window.update_idletasks()
+    width = window.winfo_width()
+    height = window.winfo_height()
+    screen_w = window.winfo_screenwidth()
+    screen_h = window.winfo_screenheight()
+    pointer_x = (parent.winfo_pointerx() if parent else window.winfo_pointerx())
+    pointer_y = (parent.winfo_pointery() if parent else window.winfo_pointery())
+    x = max(0, min(pointer_x - width // 2, screen_w - width))
+    y = max(0, min(pointer_y - height // 2, screen_h - height))
+    window.geometry(f"+{x}+{y}")
+
 class EditDialog(tk.Toplevel):
     def __init__(self, master, task, on_save):
         super().__init__(master)
@@ -51,6 +63,7 @@ class EditDialog(tk.Toplevel):
 
         self.bind("<Return>", lambda e: self.save())
         self.bind("<Escape>", lambda e: self.destroy())
+        _place_window(self, master)
 
     def save(self):
         title = self.title_var.get().strip()
@@ -99,6 +112,7 @@ class StatsDialog(tk.Toplevel):
         else:
             for title, streak in summary["top_streaks"]:
                 ttk.Label(frm, text=f"  {title} — {streak} days").pack(anchor="w")
+        _place_window(self, master)
 
 
 class SettingsDialog(tk.Toplevel):
@@ -153,6 +167,7 @@ class SettingsDialog(tk.Toplevel):
         btns.grid(row=6, column=0, columnspan=2, sticky="e", pady=(12,0))
         ttk.Button(btns, text="Save", command=self.save).pack(side=tk.LEFT, padx=6)
         ttk.Button(btns, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=6)
+        _place_window(self, master)
 
 
     def save(self):
@@ -245,6 +260,7 @@ class HelpDialog(tk.Toplevel):
             command=lambda: self._copy_tab_text(notebook),
         ).pack(side=tk.LEFT)
         ttk.Button(btns, text="Close", command=self.destroy).pack(side=tk.RIGHT)
+        _place_window(self, master)
 
     def _build_text_tab(self, notebook: ttk.Notebook, title: str, content: str) -> ttk.Frame:
         panel = ttk.Frame(notebook, padding=8)
@@ -286,6 +302,7 @@ class MantraDialog(tk.Toplevel):
         ttk.Button(btns, text="Show another", command=self._show_next).pack(side=tk.LEFT)
         ttk.Button(btns, text="Add mantra", command=self._add_mantra).pack(side=tk.LEFT, padx=8)
         ttk.Button(btns, text="Close", command=self.destroy).pack(side=tk.RIGHT)
+        _place_window(self, master)
 
     def _show_next(self):
         self.text_var.set(self.on_next())
@@ -316,6 +333,7 @@ class JournalDialog(tk.Toplevel):
         ttk.Button(btns, text="Add entry", command=self._submit).pack(side=tk.LEFT)
         ttk.Button(btns, text="Open journal file", command=self.on_open_file).pack(side=tk.LEFT, padx=8)
         ttk.Button(btns, text="Close", command=self.destroy).pack(side=tk.RIGHT)
+        _place_window(self, master)
 
     def _submit(self):
         text = self.txt.get("1.0", "end-1c").strip()
@@ -344,6 +362,7 @@ class PasteImportDialog(tk.Toplevel):
         btns.pack(fill=tk.X)
         ttk.Button(btns, text="Import", command=self._do_import).pack(side=tk.LEFT)
         ttk.Button(btns, text="Cancel", command=self.destroy).pack(side=tk.RIGHT)
+        _place_window(self, master)
 
     def _do_import(self):
         text = self.txt.get("1.0", "end-1c").strip()
@@ -387,6 +406,7 @@ class RemindersDialog(tk.Toplevel):
         ttk.Button(btns, text="Close", command=self.destroy).pack(side=tk.RIGHT)
 
         self.tree.bind("<Double-1>", lambda e: self.ack_selected())
+        _place_window(self, master)
 
     def ack_selected(self):
         sels = self.tree.selection()

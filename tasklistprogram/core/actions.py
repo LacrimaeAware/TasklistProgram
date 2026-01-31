@@ -181,6 +181,14 @@ class ActionsMixin:
         entry.focus_set()
         win.transient(self)
         win.grab_set()
+        win.update_idletasks()
+        screen_w = win.winfo_screenwidth()
+        screen_h = win.winfo_screenheight()
+        width = win.winfo_width()
+        height = win.winfo_height()
+        x = max(0, min(self.winfo_pointerx() - width // 2, screen_w - width))
+        y = max(0, min(self.winfo_pointery() - height // 2, screen_h - height))
+        win.geometry(f"+{x}+{y}")
         self.wait_window(win)
 
     def set_due_bulk(self):

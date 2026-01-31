@@ -6,8 +6,11 @@ from typing import Optional, Dict, Any, List
 from .dates import parse_stored_due
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-DATA_FILE = ROOT_DIR / "tasks_gui.json"
-BACKUP_FILE = ROOT_DIR / "tasks_gui.json.bak"
+DATA_DIR = ROOT_DIR / "data"
+DATA_FILE = DATA_DIR / "tasks_gui.json"
+BACKUP_FILE = DATA_DIR / "tasks_gui.json.bak"
+LEGACY_DATA_FILE = ROOT_DIR / "tasks_gui.json"
+LEGACY_BACKUP_FILE = ROOT_DIR / "tasks_gui.json.bak"
 
 def _load_json(path: Path):
     with path.open("r", encoding="utf-8") as f:
@@ -46,6 +49,11 @@ def normalize_settings(settings: dict) -> dict:
     return merged
 
 def load_db():
+    if not DATA_FILE.exists() and LEGACY_DATA_FILE.exists():
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        LEGACY_DATA_FILE.replace(DATA_FILE)
+        if LEGACY_BACKUP_FILE.exists():
+            LEGACY_BACKUP_FILE.replace(BACKUP_FILE)
     if not DATA_FILE.exists():
         return {"version": 1, "tasks": [], "next_id": 1}
     try:
