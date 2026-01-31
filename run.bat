@@ -1,3 +1,3 @@
 @echo off
 cd /d "%~dp0"
-py -3 app.py
+py -3 -m tasklistprogram

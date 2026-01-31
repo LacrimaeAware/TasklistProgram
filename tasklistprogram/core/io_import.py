@@ -1,7 +1,7 @@
 # io_import.py
 import re
 from datetime import datetime
-from dates import parse_due_flexible, fmt_due_for_store
+from .dates import parse_due_flexible, fmt_due_for_store
 
 VALID_REPEATS = {"none","daily","weekdays","weekly","monthly"}
 VALID_PRIOS = {"H","M","L","D","X","MISC","Misc","misc"}
@@ -97,6 +97,8 @@ def _parse_lines(lines, db):
             "times_completed": 0,
             "history": [],
             "is_deleted": False,
+            "is_suspended": False,
+            "skip_count": 0,
             "group": group.strip(),
         }
         db["tasks"].append(t)
