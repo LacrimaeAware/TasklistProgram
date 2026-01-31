@@ -154,6 +154,21 @@ class ActionsMixin:
         entry.focus_set()
         win.transient(self)
         win.grab_set()
+        
+        # Center the dialog on the master window
+        win.update_idletasks()
+        master_x = self.winfo_x()
+        master_y = self.winfo_y()
+        master_width = self.winfo_width()
+        master_height = self.winfo_height()
+        win_width = win.winfo_width()
+        win_height = win.winfo_height()
+        x = master_x + (master_width - win_width) // 2
+        y = master_y + (master_height - win_height) // 2
+        x = max(0, min(x, win.winfo_screenwidth() - win_width))
+        y = max(0, min(y, win.winfo_screenheight() - win_height))
+        win.geometry(f"+{x}+{y}")
+        
         self.wait_window(win)
 
     def set_due_bulk(self):

@@ -6,8 +6,9 @@ from typing import Optional, Dict, Any, List
 from .dates import parse_stored_due
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-DATA_FILE = ROOT_DIR / "tasks_gui.json"
-BACKUP_FILE = ROOT_DIR / "tasks_gui.json.bak"
+DATA_DIR = ROOT_DIR / "data"
+DATA_FILE = DATA_DIR / "tasks_gui.json"
+BACKUP_FILE = DATA_DIR / "tasks_gui.json.bak"
 
 def _load_json(path: Path):
     with path.open("r", encoding="utf-8") as f:
