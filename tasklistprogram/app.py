@@ -179,17 +179,11 @@ class TaskApp(ActionsMixin, tk.Tk):
             style="Caret.TButton"  # <— add this
         ).pack(side=tk.LEFT, padx=(6, 10))
 
-        self.mark_done_btn = ttk.Button(filt, text="Mark Done", command=self.mark_done)
-        self.delete_btn = ttk.Button(filt, text="Delete", command=self.soft_delete)
-        self.restore_btn = ttk.Button(filt, text="Restore", command=self.restore)
-        self.suspend_btn = ttk.Button(filt, text="Suspend", command=self.suspend_tasks)
-        self.unsuspend_btn = ttk.Button(filt, text="Unsuspend", command=self.unsuspend_tasks)
-        self.mark_done_btn.pack(side=tk.LEFT, padx=(16, 4))
-        self.delete_btn.pack(side=tk.LEFT, padx=4)
-        self.restore_btn.pack(side=tk.LEFT, padx=4)
-        self.suspend_btn.pack(side=tk.LEFT, padx=4)
-        self.unsuspend_btn.pack(side=tk.LEFT, padx=4)
-        self._update_action_buttons()
+        ttk.Button(filt, text="Mark Done", command=self.mark_done).pack(side=tk.LEFT, padx=(16, 4))
+        ttk.Button(filt, text="Delete", command=self.soft_delete).pack(side=tk.LEFT, padx=4)
+        ttk.Button(filt, text="Restore", command=self.restore).pack(side=tk.LEFT, padx=4)
+        ttk.Button(filt, text="Suspend", command=self.suspend_tasks).pack(side=tk.LEFT, padx=4)
+        ttk.Button(filt, text="Unsuspend", command=self.unsuspend_tasks).pack(side=tk.LEFT, padx=4)
 
         # === Treeview moved to TaskListView ===
         self.list = TaskListView(self, on_request_edit=self.edit_task, request_refresh=self.refresh)
@@ -232,7 +226,6 @@ class TaskApp(ActionsMixin, tk.Tk):
 
         # Attach context menu to the new tree
         self.list.tree.bind("<Button-3>", self.popup_menu)
-        self.list.tree.bind("<<TreeviewSelect>>", lambda e: self._update_action_buttons())
 
         # Initial refresh & schedule resets
         self.refresh()
@@ -381,55 +374,7 @@ class TaskApp(ActionsMixin, tk.Tk):
         if iid not in current:
             tree.selection_set(iid)
 
-        self._configure_context_menu()
         self.menu.tk_popup(event.x_root, event.y_root)
-
-    def _configure_context_menu(self):
-        self.menu.delete(0, tk.END)
-        self.menu.add_command(label="Edit", command=self.edit_task)
-        self.menu.add_command(label="Delete (soft)", command=self.soft_delete)
-        self.menu.add_command(label="Restore", command=self.restore)
-        self.menu.add_command(label="Hard Delete…", command=self.hard_delete)
-        self.menu.add_command(label="Suspend", command=self.suspend_tasks)
-        self.menu.add_command(label="Unsuspend", command=self.unsuspend_tasks)
-        self.menu.add_command(label="Open Document…", command=self.open_task_document)
-
-        show_restore = any(t.get("is_deleted") for t in self.selected_tasks())
-        show_delete = any(not t.get("is_deleted") for t in self.selected_tasks())
-        show_unsuspend = any(t.get("is_suspended") for t in self.selected_tasks())
-        show_suspend = any(not t.get("is_suspended") for t in self.selected_tasks())
-
-        def _hide(label):
-            for idx in range(self.menu.index("end") + 1):
-                if self.menu.type(idx) == "command" and self.menu.entrycget(idx, "label") == label:
-                    self.menu.delete(idx)
-                    break
-
-        if not show_delete:
-            _hide("Delete (soft)")
-        if not show_restore:
-            _hide("Restore")
-        if not show_suspend:
-            _hide("Suspend")
-        if not show_unsuspend:
-            _hide("Unsuspend")
-
-    def _update_action_buttons(self):
-        for btn in (self.delete_btn, self.restore_btn, self.suspend_btn, self.unsuspend_btn):
-            btn.pack_forget()
-        selection = self.selected_tasks()
-        show_delete = any(not t.get("is_deleted") for t in selection)
-        show_restore = any(t.get("is_deleted") for t in selection)
-        show_suspend = any(not t.get("is_suspended") for t in selection)
-        show_unsuspend = any(t.get("is_suspended") for t in selection)
-        if show_delete:
-            self.delete_btn.pack(side=tk.LEFT, padx=4)
-        if show_restore:
-            self.restore_btn.pack(side=tk.LEFT, padx=4)
-        if show_suspend:
-            self.suspend_btn.pack(side=tk.LEFT, padx=4)
-        if show_unsuspend:
-            self.unsuspend_btn.pack(side=tk.LEFT, padx=4)
 
     def open_task_document(self):
         sels = self.selected_tasks()
@@ -686,7 +631,6 @@ class TaskApp(ActionsMixin, tk.Tk):
                     self.list.tree.selection_set(iid)
                     self.list.tree.see(iid)
                     break
-        self._update_action_buttons()
 
     # ===== Stats / Settings / Reminders =====
     def open_help(self, initial_tab: str = "tutorial"):
