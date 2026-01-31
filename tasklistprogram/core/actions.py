@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from .dates import parse_due_flexible, fmt_due_for_store, parse_stored_due, add_months_dateonly, next_due
 from .model import save_db
 from ..ui.controls import AutoCompleteEntry
+from ..ui.utils import center_window
 
 class ActionsMixin:
     def mark_done(self):
@@ -156,18 +157,7 @@ class ActionsMixin:
         win.grab_set()
         
         # Center the dialog on the master window
-        win.update_idletasks()
-        master_x = self.winfo_x()
-        master_y = self.winfo_y()
-        master_width = self.winfo_width()
-        master_height = self.winfo_height()
-        win_width = win.winfo_width()
-        win_height = win.winfo_height()
-        x = master_x + (master_width - win_width) // 2
-        y = master_y + (master_height - win_height) // 2
-        x = max(0, min(x, win.winfo_screenwidth() - win_width))
-        y = max(0, min(y, win.winfo_screenheight() - win_height))
-        win.geometry(f"+{x}+{y}")
+        center_window(win, self)
         
         self.wait_window(win)
 

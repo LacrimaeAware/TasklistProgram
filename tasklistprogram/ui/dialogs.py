@@ -1,37 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from ..core.dates import parse_due_flexible, fmt_due_for_store
-
-
-def _center_window(window, master=None):
-    """Center a window relative to its master or on screen."""
-    window.update_idletasks()
-    
-    # Get window dimensions
-    width = window.winfo_width()
-    height = window.winfo_height()
-    
-    if master and master.winfo_exists():
-        # Center relative to master window
-        master_x = master.winfo_x()
-        master_y = master.winfo_y()
-        master_width = master.winfo_width()
-        master_height = master.winfo_height()
-        
-        x = master_x + (master_width - width) // 2
-        y = master_y + (master_height - height) // 2
-    else:
-        # Center on screen
-        screen_width = window.winfo_screenwidth()
-        screen_height = window.winfo_screenheight()
-        x = (screen_width - width) // 2
-        y = (screen_height - height) // 2
-    
-    # Ensure the window is fully on screen
-    x = max(0, min(x, window.winfo_screenwidth() - width))
-    y = max(0, min(y, window.winfo_screenheight() - height))
-    
-    window.geometry(f"+{x}+{y}")
+from .utils import center_window
 
 
 class EditDialog(tk.Toplevel):
@@ -82,7 +52,7 @@ class EditDialog(tk.Toplevel):
         self.bind("<Escape>", lambda e: self.destroy())
         
         # Center the dialog on the master window
-        _center_window(self, master)
+        center_window(self, master)
 
     def save(self):
         title = self.title_var.get().strip()
@@ -131,7 +101,7 @@ class StatsDialog(tk.Toplevel):
                 ttk.Label(frm, text=f"  {title} — {streak} days").pack(anchor="w")
         
         # Center the dialog on the master window
-        _center_window(self, master)
+        center_window(self, master)
 
 
 class SettingsDialog(tk.Toplevel):
@@ -173,7 +143,7 @@ class SettingsDialog(tk.Toplevel):
         ttk.Button(btns, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=6)
         
         # Center the dialog on the master window
-        _center_window(self, master)
+        center_window(self, master)
 
 
     def save(self):
@@ -265,7 +235,7 @@ class HelpDialog(tk.Toplevel):
         ttk.Button(btns, text="Close", command=self.destroy).pack(side=tk.RIGHT)
         
         # Center the dialog on the master window
-        _center_window(self, master)
+        center_window(self, master)
 
     def _build_text_tab(self, notebook: ttk.Notebook, title: str, content: str) -> ttk.Frame:
         panel = ttk.Frame(notebook, padding=8)
@@ -306,7 +276,7 @@ class PasteImportDialog(tk.Toplevel):
         ttk.Button(btns, text="Cancel", command=self.destroy).pack(side=tk.RIGHT)
         
         # Center the dialog on the master window
-        _center_window(self, master)
+        center_window(self, master)
 
     def _do_import(self):
         text = self.txt.get("1.0", "end-1c").strip()
@@ -352,7 +322,7 @@ class RemindersDialog(tk.Toplevel):
         self.tree.bind("<Double-1>", lambda e: self.ack_selected())
         
         # Center the dialog on the master window
-        _center_window(self, master)
+        center_window(self, master)
 
     def ack_selected(self):
         sels = self.tree.selection()
