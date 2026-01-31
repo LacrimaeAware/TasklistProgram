@@ -4,16 +4,23 @@ import re
 from typing import Optional, Tuple, List
 from datetime import datetime, date, timedelta
 
-from .dates import parse_due_flexible, fmt_due_for_store, parse_stored_due, next_due, add_months_dateonly
-from .model import load_db, save_db, get_task, delete_task, stats_summary
-from .widgets import EditDialog, StatsDialog, SettingsDialog, RemindersDialog, ImportInstructionsDialog, PasteImportDialog
-from .io_import import import_from_txt, import_from_string
+from .core.dates import parse_due_flexible, fmt_due_for_store, parse_stored_due, next_due
+from .core.model import load_db, save_db, get_task, delete_task, stats_summary
+from .ui.dialogs import (
+    EditDialog,
+    StatsDialog,
+    SettingsDialog,
+    RemindersDialog,
+    PasteImportDialog,
+    HelpDialog,
+)
+from .core.io_import import import_from_string
 
-from .actions import ActionsMixin
+from .core.actions import ActionsMixin
 
-from .listview import TaskListView
-from .controls import AutoCompleteEntry
-from .constants import PRIORITY_ORDER, PRIO_ICON
+from .ui.listview import TaskListView
+from .ui.controls import AutoCompleteEntry
+from .core.constants import PRIORITY_ORDER, PRIO_ICON
 
 class TaskApp(ActionsMixin, tk.Tk):
     def __init__(self):
@@ -32,8 +39,11 @@ class TaskApp(ActionsMixin, tk.Tk):
         file_menu.add_command(label="Reminders…", command=self.open_reminders)
         file_menu.add_command(label="Import Tasks…", command=self.import_tasks)
         file_menu.add_command(label="Import (paste text)…", command=self.import_tasks_paste)
-        file_menu.add_command(label="Import Instructions…", command=self.open_import_instructions)
         menubar.add_cascade(label="File", menu=file_menu)
+
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="Help / Guide…", command=self.open_help)
+        menubar.add_cascade(label="Help", menu=help_menu)
         self.config(menu=menubar)
 
         self.sort_state: Tuple[str, bool] = ("due", True)  # (column, ascending)
@@ -80,12 +90,23 @@ class TaskApp(ActionsMixin, tk.Tk):
         filt = ttk.Frame(self, padding=(8,0,8,8))
         filt.pack(fill=tk.X)
         ttk.Label(filt, text="Filter:").pack(side=tk.LEFT)
-        self.filter_var = tk.StringVar(value="all")
+        settings = self.db.get("settings", {})
+        default_filter = settings.get("ui_filter_scope", "all")
+        if default_filter not in ["today", "week", "overdue", "habits", "all", "done", "deleted"]:
+            default_filter = "all"
+        self.filter_var = tk.StringVar(value=default_filter)
         fcombo = ttk.Combobox(filt, textvariable=self.filter_var, width=10,
                               values=["today","week","overdue","habits","all","done","deleted"],
                               state="readonly")
         fcombo.pack(side=tk.LEFT, padx=6)
-        fcombo.bind("<<ComboboxSelected>>", lambda e: self.refresh())
+
+        def _apply_filter(*_):
+            s = self.db.setdefault("settings", {})
+            s["ui_filter_scope"] = self.filter_var.get()
+            save_db(self.db)
+            self.refresh()
+
+        fcombo.bind("<<ComboboxSelected>>", _apply_filter)
 
         ttk.Label(filt, text="Search:").pack(side=tk.LEFT, padx=(16,0))
         self.search_var = tk.StringVar()
@@ -106,8 +127,15 @@ class TaskApp(ActionsMixin, tk.Tk):
         mincombo.bind("<<ComboboxSelected>>", _apply_minprio)
 
         # Grouping toggle
-        self.group_view = tk.BooleanVar(value=False)
-        ttk.Checkbutton(filt, text="Group view", variable=self.group_view, command=self.refresh) \
+        self.group_view = tk.BooleanVar(value=bool(settings.get("ui_group_view", False)))
+
+        def _apply_group_view():
+            s = self.db.setdefault("settings", {})
+            s["ui_group_view"] = bool(self.group_view.get())
+            save_db(self.db)
+            self.refresh()
+
+        ttk.Checkbutton(filt, text="Group view", variable=self.group_view, command=_apply_group_view) \
             .pack(side=tk.LEFT, padx=(16, 0))
 
         # --- style: make the caret button flat and remove focus ring
@@ -134,8 +162,6 @@ class TaskApp(ActionsMixin, tk.Tk):
         ttk.Button(filt, text="Restore", command=self.restore).pack(side=tk.LEFT, padx=4)
 
         # === Treeview moved to TaskListView ===
-        # (local import here so you don't have to touch imports above)
-        from .listview import TaskListView
         self.list = TaskListView(self, on_request_edit=self.edit_task, request_refresh=self.refresh)
 
         # Keep header sort behavior in app.py so sort state stays consistent
@@ -526,8 +552,8 @@ class TaskApp(ActionsMixin, tk.Tk):
                     break
 
     # ===== Stats / Settings / Reminders =====
-    def open_import_instructions(self):
-        ImportInstructionsDialog(self)
+    def open_help(self, initial_tab: str = "tutorial"):
+        HelpDialog(self, initial_tab=initial_tab)
 
     def import_tasks_paste(self):
         def _do(text):
@@ -544,7 +570,7 @@ class TaskApp(ActionsMixin, tk.Tk):
         StatsDialog(self, summary)
 
     def import_tasks(self):
-        from .io_import import import_from_txt
+        from .core.io_import import import_from_txt
         path = filedialog.askopenfilename(title="Import tasks",
                                           filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
         if not path: return
@@ -562,11 +588,14 @@ class TaskApp(ActionsMixin, tk.Tk):
 
     def open_settings(self):
         def on_save(s):
-            self.db["settings"] = s; save_db(self.db)
+            merged = dict(self.db.get("settings", {}))
+            merged.update(s)
+            self.db["settings"] = merged
+            save_db(self.db)
         SettingsDialog(self, self.db.get("settings", None), on_save)
 
     def open_reminders(self):
-        from .reminders import pending_reminders
+        from .core.reminders import pending_reminders
         pending = pending_reminders(self.db)
         if not pending:
             messagebox.showinfo("Reminders", "No pending reminders right now.")
@@ -584,7 +613,7 @@ class TaskApp(ActionsMixin, tk.Tk):
         RemindersDialog(self, pending, on_ack)
 
     def _reminder_chip(self, t) -> str:
-        from .reminders import reminder_chip
+        from .core.reminders import reminder_chip
         return reminder_chip(t, self.db.get("settings", {}))
 
     def check_reminders(self):

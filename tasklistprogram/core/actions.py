@@ -1,4 +1,4 @@
-# actions_mixin.py  (rename file to this)
+# actions_mixin.py
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import re
@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 
 from .dates import parse_due_flexible, fmt_due_for_store, parse_stored_due, add_months_dateonly, next_due
 from .model import save_db
-from .controls import AutoCompleteEntry
+from ..ui.controls import AutoCompleteEntry
 
 class ActionsMixin:
     def mark_done(self):

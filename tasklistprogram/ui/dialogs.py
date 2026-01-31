@@ -1,8 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Optional
-from datetime import datetime, date, timedelta
-from .dates import parse_due_flexible, fmt_due_for_store, parse_stored_due
+from ..core.dates import parse_due_flexible, fmt_due_for_store
 
 class EditDialog(tk.Toplevel):
     def __init__(self, master, task, on_save):
@@ -147,38 +145,101 @@ class SettingsDialog(tk.Toplevel):
         self.on_save(data)
         self.destroy()
 
-class ImportInstructionsDialog(tk.Toplevel):
-    def __init__(self, master):
+class HelpDialog(tk.Toplevel):
+    def __init__(self, master, initial_tab: str = "tutorial"):
         super().__init__(master)
-        self.title("Import Instructions")
+        self.title("Help & Guide")
+        self.geometry("820x560")
         self.resizable(True, True)
 
         frm = ttk.Frame(self, padding=10)
         frm.pack(fill=tk.BOTH, expand=True)
 
-        txt = tk.Text(frm, width=84, height=20, wrap="word")
-        txt.pack(fill=tk.BOTH, expand=True)
+        notebook = ttk.Notebook(frm)
+        notebook.pack(fill=tk.BOTH, expand=True)
 
-        instructions = (
-            "Paste or generate tasks in this format (one per line):\n"
-            "  Title | due: <date or time or +rel> | prio: H/M/L/D/Misc | repeat: none/daily/weekdays/weekly/monthly | group: <name> | notes: <free text>\n\n"
-            "Shortcuts:\n"
-            "  • Plain text before the first '|' becomes the title.\n"
-            "  • due accepts 'YYYY-MM-DD', 'MM/DD', 'HH:MM', 'HHMM', words like 'tomorrow', 'fri', or '+2d +3h'.\n"
-            "  • prio: H/M/L/D (D forces repeat=daily), or 'Misc'.\n"
-            "  • Any field is optional. Unknown fields are ignored.\n\n"
-            "Examples:\n"
-            "  Project 1 Due | due: Sept 29 | prio: H | group: CS101 | notes: start early\n"
-            "  Program Assignment 3 Due | due: 09/22 | prio: M | group: CS101\n"
-            "  Midterm Exam | due: 10/13 14:00 | prio: H | group: CS101\n"
-            "  Reflection 2 Due | due: Dec 1 | prio: L | group: CS101\n"
+        tutorial = self._build_text_tab(
+            notebook,
+            "Quick Start",
+            (
+                "Getting started\n"
+                "• Add a task: fill Title and (optional) Due/Priority/Repeat, then click Add.\n"
+                "• Edit a task: double-click a row.\n"
+                "• Mark done: select task(s) and click Mark Done.\n"
+                "• Delete or restore: use Delete/Restore or the right-click menu.\n\n"
+                "Fields explained\n"
+                "• Title: a short label for the task.\n"
+                "• Due: accepts date-only or date+time (see examples below).\n"
+                "• Priority: H/M/L/D/Misc (D = daily habit).\n"
+                "• Repeat: none, daily, weekdays, weekly, monthly.\n"
+                "• Notes: free text, useful for details.\n"
+                "• Group: optional label used for grouping in the list.\n\n"
+                "Due date formats (examples)\n"
+                "• 2024-10-05\n"
+                "• 2024-10-05 14:00\n"
+                "• 10/05\n"
+                "• 10/05 14:00\n"
+                "• 14:00 or 1400 (today at 2:00 PM)\n"
+                "• midnight (today at 23:59)\n"
+                "• +2d +3h (relative)\n\n"
+                "Tips\n"
+                "• Use Group view to collapse tasks by group.\n"
+                "• Search filters titles and notes.\n"
+                "• Group view and filter selections are saved between runs.\n"
+            ),
         )
-        txt.insert("1.0", instructions)
+
+        import_tab = self._build_text_tab(
+            notebook,
+            "Import Instructions",
+            (
+                "Paste or generate tasks in this format (one per line):\n"
+                "  Title | due: <date or time or +rel> | prio: H/M/L/D/Misc | repeat: none/daily/weekdays/weekly/monthly | group: <name> | notes: <free text>\n\n"
+                "Shortcuts:\n"
+                "  • Plain text before the first '|' becomes the title.\n"
+                "  • due accepts 'YYYY-MM-DD', 'MM/DD', 'HH:MM', 'HHMM', words like 'tomorrow', 'fri', or '+2d +3h'.\n"
+                "  • prio: H/M/L/D (D forces repeat=daily), or 'Misc'.\n"
+                "  • Any field is optional. Unknown fields are ignored.\n\n"
+                "Examples:\n"
+                "  Project 1 Due | due: Sept 29 | prio: H | group: CS101 | notes: start early\n"
+                "  Program Assignment 3 Due | due: 09/22 | prio: M | group: CS101\n"
+                "  Midterm Exam | due: 10/13 14:00 | prio: H | group: CS101\n"
+                "  Reflection 2 Due | due: Dec 1 | prio: L | group: CS101\n"
+            ),
+        )
+
+        notebook.add(tutorial, text="Tutorial")
+        notebook.add(import_tab, text="Import")
+
+        tabs = {"tutorial": 0, "import": 1}
+        notebook.select(tabs.get(initial_tab, 0))
 
         btns = ttk.Frame(frm)
         btns.pack(fill=tk.X, pady=(8, 0))
-        ttk.Button(btns, text="Copy", command=lambda: (self.clipboard_clear(), self.clipboard_append(txt.get("1.0","end-1c")))).pack(side=tk.LEFT)
+        ttk.Button(
+            btns,
+            text="Copy Tab",
+            command=lambda: self._copy_tab_text(notebook),
+        ).pack(side=tk.LEFT)
         ttk.Button(btns, text="Close", command=self.destroy).pack(side=tk.RIGHT)
+
+    def _build_text_tab(self, notebook: ttk.Notebook, title: str, content: str) -> ttk.Frame:
+        panel = ttk.Frame(notebook, padding=8)
+        txt = tk.Text(panel, width=84, height=24, wrap="word")
+        txt.insert("1.0", content)
+        txt.config(state="disabled")
+        txt.pack(fill=tk.BOTH, expand=True)
+        panel._text_widget = txt
+        panel._tab_title = title
+        return panel
+
+    def _copy_tab_text(self, notebook: ttk.Notebook) -> None:
+        panel = notebook.nametowidget(notebook.select())
+        txt = getattr(panel, "_text_widget", None)
+        if not txt:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(txt.get("1.0", "end-1c"))
 
 
 class PasteImportDialog(tk.Toplevel):
