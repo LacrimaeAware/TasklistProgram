@@ -180,4 +180,8 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 tasks_gui.json
+tasks_gui.json.bak
+tasks_gui.json.tmp
 /import texts
+/tasks
+/journals

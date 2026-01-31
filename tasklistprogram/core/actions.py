@@ -1,12 +1,13 @@
-# actions_mixin.py  (rename file to this)
+# actions_mixin.py
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import re
 from datetime import date, datetime, timedelta
 
-from dates import parse_due_flexible, fmt_due_for_store, parse_stored_due, add_months_dateonly, next_due
-from model import save_db
-from controls import AutoCompleteEntry
+from .dates import parse_due_flexible, fmt_due_for_store, parse_stored_due, add_months_dateonly, next_due
+from .model import save_db
+from .documents import append_journal_task
+from ..ui.controls import AutoCompleteEntry
 
 class ActionsMixin:
     def mark_done(self):
@@ -21,6 +22,12 @@ class ActionsMixin:
             t["completed_at"] = datetime.now().isoformat(timespec="seconds")
             t["times_completed"] = t.get("times_completed", 0) + 1
             t.setdefault("history", []).append(date.today().isoformat())
+            t["skip_count"] = 0
+            if "base_priority" in t:
+                t["priority"] = t.get("base_priority", t.get("priority", "M"))
+                t.pop("base_priority", None)
+
+            append_journal_task(t.get("title", ""))
 
             if rep != "none":
                 cur = t.get("due", "")
@@ -64,6 +71,26 @@ class ActionsMixin:
             t.pop("deleted_at", None)
         save_db(self.db)
         self.refresh()
+
+    def suspend_tasks(self):
+        changed = False
+        for t in self.selected_tasks():
+            if not t.get("is_suspended"):
+                t["is_suspended"] = True
+                changed = True
+        if changed:
+            save_db(self.db)
+            self.refresh()
+
+    def unsuspend_tasks(self):
+        changed = False
+        for t in self.selected_tasks():
+            if t.get("is_suspended"):
+                t["is_suspended"] = False
+                changed = True
+        if changed:
+            save_db(self.db)
+            self.refresh()
 
     def hard_delete(self):
         sels = self.selected_tasks()
@@ -199,6 +226,8 @@ class ActionsMixin:
             else:
                 t["due"] = (dt + timedelta(days=n)).strftime("%Y-%m-%d %H:%M")
             t["bumped_count"] = t.get("bumped_count", 0) + 1
+            if hasattr(self, "_apply_skip_escalation"):
+                self._apply_skip_escalation(t)
         save_db(self.db)
         self.refresh()
 
@@ -216,5 +245,7 @@ class ActionsMixin:
                 # keep simple 30-day month bump for time-of-day tasks
                 t["due"] = (dt + timedelta(days=30)).strftime("%Y-%m-%d %H:%M")
             t["bumped_count"] = t.get("bumped_count", 0) + 1
+            if hasattr(self, "_apply_skip_escalation"):
+                self._apply_skip_escalation(t)
         save_db(self.db)
         self.refresh()

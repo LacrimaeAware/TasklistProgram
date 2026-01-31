@@ -42,12 +42,14 @@ class TaskListView:
         self._default_font = tkfont.nametofont("TkDefaultFont")
         self._group_font = self._default_font.copy()
         self._group_font.configure(size=max(9, self._default_font.cget("size")), weight="bold")
+        self.tree.tag_configure("prio_U", background="#ffb3b3")
         self.tree.tag_configure("prio_H", background="#ffe0e0")
         self.tree.tag_configure("prio_M", background="#ffd8a8")
         self.tree.tag_configure("prio_L", background="#fff59d")
         self.tree.tag_configure("prio_D", background="#e6ffe6")
         self.tree.tag_configure("prio_X", background="#e0f0ff")
         self.tree.tag_configure("deleted", foreground="#888888")
+        self.tree.tag_configure("suspended", foreground="#888888")
         self.tree.tag_configure("group_header", background="#eef3ff", foreground="#222", font=self._group_font)
 
         self.tree.bind("<Double-1>", self._on_double_click)
@@ -148,8 +150,9 @@ class TaskListView:
     def _insert_task_row(self, t, scope, prio_icon, reminder_chip_fn):
         due = t.get("deleted_at", "") if scope == "deleted" else t.get("due", "")
         prio = prio_icon.get((t.get("priority","M") or "M").upper(), t.get("priority","M"))
+        display_title = t.get("_display_title", t.get("title",""))
         row_map = {
-            "title": t.get("title",""),
+            "title": display_title,
             "due": due,
             "rem": (reminder_chip_fn(t) if callable(reminder_chip_fn) else ""),
             "prio": prio,
@@ -163,6 +166,7 @@ class TaskListView:
         p = t.get("priority")
         if p: tags.append(f"prio_{p.upper()}")
         if t.get("is_deleted"): tags.append("deleted")
+        if t.get("is_suspended"): tags.append("suspended")
         self.tree.insert("", tk.END, values=vals, tags=tuple(tags))
 
     def _autosize_columns(self):

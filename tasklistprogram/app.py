@@ -4,16 +4,33 @@ import re
 from typing import Optional, Tuple, List
 from datetime import datetime, date, timedelta
 
-from dates import parse_due_flexible, fmt_due_for_store, parse_stored_due, next_due, add_months_dateonly
-from model import load_db, save_db, get_task, delete_task, stats_summary
-from widgets import EditDialog, StatsDialog, SettingsDialog, RemindersDialog, ImportInstructionsDialog, PasteImportDialog
-from io_import import import_from_txt, import_from_string
+from .core.dates import parse_due_flexible, fmt_due_for_store, parse_stored_due, next_due
+from .core.model import load_db, save_db, get_task, delete_task, stats_summary, normalize_settings
+from .ui.dialogs import (
+    EditDialog,
+    StatsDialog,
+    SettingsDialog,
+    RemindersDialog,
+    PasteImportDialog,
+    HelpDialog,
+    MantraDialog,
+    JournalDialog,
+)
+from .core.io_import import import_from_string
+from .core.documents import (
+    sync_task_notes,
+    move_task_document_if_needed,
+    open_document,
+    append_journal_task,
+    append_journal_manual,
+    ensure_journal_path,
+)
 
-from actions import ActionsMixin
+from .core.actions import ActionsMixin
 
-from listview import TaskListView
-from controls import AutoCompleteEntry
-from constants import PRIORITY_ORDER, PRIO_ICON
+from .ui.listview import TaskListView
+from .ui.controls import AutoCompleteEntry
+from .core.constants import PRIORITY_ORDER, PRIO_ICON
 
 class TaskApp(ActionsMixin, tk.Tk):
     def __init__(self):
@@ -32,8 +49,19 @@ class TaskApp(ActionsMixin, tk.Tk):
         file_menu.add_command(label="Reminders…", command=self.open_reminders)
         file_menu.add_command(label="Import Tasks…", command=self.import_tasks)
         file_menu.add_command(label="Import (paste text)…", command=self.import_tasks_paste)
-        file_menu.add_command(label="Import Instructions…", command=self.open_import_instructions)
         menubar.add_cascade(label="File", menu=file_menu)
+
+        mantra_menu = tk.Menu(menubar, tearoff=0)
+        mantra_menu.add_command(label="Show Mantra…", command=self.open_mantras)
+        menubar.add_cascade(label="Mantras", menu=mantra_menu)
+
+        journal_menu = tk.Menu(menubar, tearoff=0)
+        journal_menu.add_command(label="Journal…", command=self.open_journal)
+        menubar.add_cascade(label="Journal", menu=journal_menu)
+
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="Help / Guide…", command=self.open_help)
+        menubar.add_cascade(label="Help", menu=help_menu)
         self.config(menu=menubar)
 
         self.sort_state: Tuple[str, bool] = ("due", True)  # (column, ascending)
@@ -80,12 +108,26 @@ class TaskApp(ActionsMixin, tk.Tk):
         filt = ttk.Frame(self, padding=(8,0,8,8))
         filt.pack(fill=tk.X)
         ttk.Label(filt, text="Filter:").pack(side=tk.LEFT)
-        self.filter_var = tk.StringVar(value="all")
+        settings = normalize_settings(self.db.get("settings", {}))
+        self.db["settings"] = settings
+        default_filter = settings.get("ui_filter_scope", "all")
+        if default_filter == "habits":
+            default_filter = "repeating"
+        if default_filter not in ["today", "week", "overdue", "repeating", "all", "done", "deleted", "suspended"]:
+            default_filter = "all"
+        self.filter_var = tk.StringVar(value=default_filter)
         fcombo = ttk.Combobox(filt, textvariable=self.filter_var, width=10,
-                              values=["today","week","overdue","habits","all","done","deleted"],
+                              values=["today","week","overdue","repeating","all","done","deleted","suspended"],
                               state="readonly")
         fcombo.pack(side=tk.LEFT, padx=6)
-        fcombo.bind("<<ComboboxSelected>>", lambda e: self.refresh())
+
+        def _apply_filter(*_):
+            s = self.db.setdefault("settings", {})
+            s["ui_filter_scope"] = self.filter_var.get()
+            save_db(self.db)
+            self.refresh()
+
+        fcombo.bind("<<ComboboxSelected>>", _apply_filter)
 
         ttk.Label(filt, text="Search:").pack(side=tk.LEFT, padx=(16,0))
         self.search_var = tk.StringVar()
@@ -106,8 +148,15 @@ class TaskApp(ActionsMixin, tk.Tk):
         mincombo.bind("<<ComboboxSelected>>", _apply_minprio)
 
         # Grouping toggle
-        self.group_view = tk.BooleanVar(value=False)
-        ttk.Checkbutton(filt, text="Group view", variable=self.group_view, command=self.refresh) \
+        self.group_view = tk.BooleanVar(value=bool(settings.get("ui_group_view", False)))
+
+        def _apply_group_view():
+            s = self.db.setdefault("settings", {})
+            s["ui_group_view"] = bool(self.group_view.get())
+            save_db(self.db)
+            self.refresh()
+
+        ttk.Checkbutton(filt, text="Group view", variable=self.group_view, command=_apply_group_view) \
             .pack(side=tk.LEFT, padx=(16, 0))
 
         # --- style: make the caret button flat and remove focus ring
@@ -132,10 +181,10 @@ class TaskApp(ActionsMixin, tk.Tk):
         ttk.Button(filt, text="Mark Done", command=self.mark_done).pack(side=tk.LEFT, padx=(16, 4))
         ttk.Button(filt, text="Delete", command=self.soft_delete).pack(side=tk.LEFT, padx=4)
         ttk.Button(filt, text="Restore", command=self.restore).pack(side=tk.LEFT, padx=4)
+        ttk.Button(filt, text="Suspend", command=self.suspend_tasks).pack(side=tk.LEFT, padx=4)
+        ttk.Button(filt, text="Unsuspend", command=self.unsuspend_tasks).pack(side=tk.LEFT, padx=4)
 
         # === Treeview moved to TaskListView ===
-        # (local import here so you don't have to touch imports above)
-        from listview import TaskListView
         self.list = TaskListView(self, on_request_edit=self.edit_task, request_refresh=self.refresh)
 
         # Keep header sort behavior in app.py so sort state stays consistent
@@ -151,6 +200,9 @@ class TaskApp(ActionsMixin, tk.Tk):
         self.menu.add_command(label="Delete (soft)", command=self.soft_delete)
         self.menu.add_command(label="Restore", command=self.restore)
         self.menu.add_command(label="Hard Delete…", command=self.hard_delete)
+        self.menu.add_command(label="Suspend", command=self.suspend_tasks)
+        self.menu.add_command(label="Unsuspend", command=self.unsuspend_tasks)
+        self.menu.add_command(label="Open Document…", command=self.open_task_document)
 
         setp = tk.Menu(self.menu, tearoff=0)
         setp.add_command(label="High",   command=lambda: self.set_priority_bulk("H"))
@@ -179,6 +231,7 @@ class TaskApp(ActionsMixin, tk.Tk):
         self.after(300, self.check_reminders)
         self.reset_repeating_tasks(catchup=True)
         self.schedule_midnight_reset()
+        self.after(600, self._maybe_show_mantra_on_launch)
 
         # Keyboard shortcuts
         self.bind("<Delete>", lambda e: self.soft_delete())
@@ -224,6 +277,7 @@ class TaskApp(ActionsMixin, tk.Tk):
                 else:
                     due_dt = datetime.combine(next_day, datetime.min.time())
                 changed = True
+                self._apply_skip_escalation(t)
                 # loop to catch up multiple missed occurrences
 
             # If task was completed previously and the (possibly-updated) due is today,
@@ -270,6 +324,28 @@ class TaskApp(ActionsMixin, tk.Tk):
         minv_code = 'X' if isinstance(minv, str) and minv.lower() == 'misc' else (minv or 'L').upper()
         return PRIORITY_ORDER.get((p or 'M').upper(), 0) >= PRIORITY_ORDER.get(minv_code, 2)
 
+    def _hazard_enabled(self) -> bool:
+        return bool(self.db.get("settings", {}).get("hazard_escalation_enabled", False))
+
+    def _apply_skip_escalation(self, task: dict) -> None:
+        if not self._hazard_enabled():
+            return
+        if (task.get("repeat") or "none").lower() in ("", "none"):
+            return
+        task["skip_count"] = int(task.get("skip_count", 0)) + 1
+        if task["skip_count"] >= 2 and "base_priority" not in task:
+            task["base_priority"] = task.get("priority", "M")
+        if task["skip_count"] >= 3:
+            task["priority"] = "U"
+        elif task["skip_count"] >= 2:
+            task["priority"] = "H"
+
+    def _display_title(self, task: dict) -> str:
+        title = task.get("title", "")
+        if self._hazard_enabled() and int(task.get("skip_count", 0)) >= 1:
+            return f"⚠ {title}"
+        return title
+
     def _title_candidates(self):
         items = [(t.get("title",""), t.get("times_completed",0)) for t in self.db["tasks"] if t.get("title")]
         items.sort(key=lambda x: (-x[1], x[0].lower()))
@@ -298,6 +374,16 @@ class TaskApp(ActionsMixin, tk.Tk):
             tree.selection_set(iid)
 
         self.menu.tk_popup(event.x_root, event.y_root)
+
+    def open_task_document(self):
+        sels = self.selected_tasks()
+        if not sels:
+            return
+        task = sels[0]
+        move_task_document_if_needed(task)
+        path = sync_task_notes(task)
+        save_db(self.db)
+        open_document(path)
 
     # ===== Add & Quick Add =====
     def add_task(self):
@@ -340,10 +426,14 @@ class TaskApp(ActionsMixin, tk.Tk):
             "times_completed": 0,
             "history": [],
             "is_deleted": False,
+            "is_suspended": False,
+            "skip_count": 0,
             "group": ""  # group set via Edit or bulk action
         }
         self.db["tasks"].append(t)
         self.db["next_id"] += 1
+        save_db(self.db)
+        sync_task_notes(t)
         save_db(self.db)
         self.title_var.set(""); self.due_var.set(""); self.notes_txt.delete("1.0", "end")
         self.refresh(select_id=t["id"])
@@ -364,9 +454,13 @@ class TaskApp(ActionsMixin, tk.Tk):
             "times_completed": 0,
             "history": [],
             "is_deleted": False,
+            "is_suspended": False,
+            "skip_count": 0,
             "group": ""
         }
         self.db["tasks"].append(t); self.db["next_id"] += 1
+        save_db(self.db)
+        sync_task_notes(t)
         save_db(self.db)
         self.title_var.set("")
         self.refresh(select_id=t["id"])
@@ -388,6 +482,8 @@ class TaskApp(ActionsMixin, tk.Tk):
             t["notes"] = data["notes"]
             t["group"] = data.get("group","").strip()
             t["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            move_task_document_if_needed(t)
+            sync_task_notes(t)
             save_db(self.db)
             self.refresh(select_id=t["id"])
         EditDialog(self, t, on_save)
@@ -409,6 +505,8 @@ class TaskApp(ActionsMixin, tk.Tk):
             t["notes"] = data["notes"]
             t["group"] = data.get("group","").strip()
             t["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            move_task_document_if_needed(t)
+            sync_task_notes(t)
             save_db(self.db)
             self.refresh(select_id=t["id"])
         EditDialog(self, t, on_save)
@@ -435,7 +533,11 @@ class TaskApp(ActionsMixin, tk.Tk):
     def passes_filter(self, t, scope):
         if scope == "deleted":
             return t.get("is_deleted", False)
+        if scope == "suspended":
+            return t.get("is_suspended", False) and not t.get("is_deleted", False)
         if t.get("is_deleted", False):
+            return False
+        if t.get("is_suspended", False):
             return False
 
         done = bool(t.get("completed_at"))
@@ -451,14 +553,14 @@ class TaskApp(ActionsMixin, tk.Tk):
             return done
         if scope == "all":
             return True
-        if scope == "habits":
+        if scope in ("habits", "repeating"):
             return t.get("repeat") in ("daily", "weekdays", "weekly", "monthly")
         if scope == "overdue":
             return (d and d < now) and not done
         if scope == "week":
             if d is None:
                 return False
-            return now <= d <= (now + timedelta(days=7))
+            return d <= (now + timedelta(days=7))
         if scope == "today":
             if not d:
                 return False
@@ -494,11 +596,15 @@ class TaskApp(ActionsMixin, tk.Tk):
 
     def refresh(self, select_id: Optional[int] = None):
         scope = self.filter_var.get()
+        if scope == "habits":
+            scope = "repeating"
         query = self.search_var.get().strip()
         col, asc = self.sort_state
 
         tasks = [t for t in self.db["tasks"] if self.passes_filter(t, scope) and self.search_match(t, query)]
         tasks.sort(key=lambda x: self.sort_key_for(x, col), reverse=not asc)
+        for t in tasks:
+            t["_display_title"] = self._display_title(t)
 
         grouped = bool(self.group_view.get())
 
@@ -526,8 +632,57 @@ class TaskApp(ActionsMixin, tk.Tk):
                     break
 
     # ===== Stats / Settings / Reminders =====
-    def open_import_instructions(self):
-        ImportInstructionsDialog(self)
+    def open_help(self, initial_tab: str = "tutorial"):
+        HelpDialog(self, initial_tab=initial_tab)
+
+    def open_mantras(self):
+        def _next():
+            return self._pick_random_mantra()
+
+        def _add():
+            text = simpledialog.askstring("Add Mantra", "Enter a new mantra:", parent=self)
+            if text:
+                self.db.setdefault("mantras", []).append(text.strip())
+                save_db(self.db)
+                return text.strip()
+            return None
+
+        MantraDialog(self, self.db.get("mantras", []), on_add=_add, on_next=_next, initial=self._pick_mantra_of_day())
+
+    def _pick_mantra_of_day(self) -> str:
+        mantras = self.db.get("mantras", [])
+        if not mantras:
+            return ""
+        idx = date.today().toordinal() % len(mantras)
+        return mantras[idx]
+
+    def _pick_random_mantra(self) -> str:
+        mantras = self.db.get("mantras", [])
+        if not mantras:
+            return ""
+        import random
+        return random.choice(mantras)
+
+    def _maybe_show_mantra_on_launch(self):
+        settings = self.db.get("settings", {})
+        if not settings.get("mantras_autoshow", True):
+            return
+        today_key = date.today().isoformat()
+        if settings.get("last_mantra_date") == today_key:
+            return
+        settings["last_mantra_date"] = today_key
+        save_db(self.db)
+        self.open_mantras()
+
+    def open_journal(self):
+        def _add_entry(text: str):
+            append_journal_manual(text)
+
+        def _open_file():
+            path = ensure_journal_path()
+            open_document(path)
+
+        JournalDialog(self, on_add_entry=_add_entry, on_open_file=_open_file)
 
     def import_tasks_paste(self):
         def _do(text):
@@ -544,7 +699,7 @@ class TaskApp(ActionsMixin, tk.Tk):
         StatsDialog(self, summary)
 
     def import_tasks(self):
-        from io_import import import_from_txt
+        from .core.io_import import import_from_txt
         path = filedialog.askopenfilename(title="Import tasks",
                                           filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
         if not path: return
@@ -562,11 +717,14 @@ class TaskApp(ActionsMixin, tk.Tk):
 
     def open_settings(self):
         def on_save(s):
-            self.db["settings"] = s; save_db(self.db)
+            merged = normalize_settings(self.db.get("settings", {}))
+            merged.update(s)
+            self.db["settings"] = merged
+            save_db(self.db)
         SettingsDialog(self, self.db.get("settings", None), on_save)
 
     def open_reminders(self):
-        from reminders import pending_reminders
+        from .core.reminders import pending_reminders
         pending = pending_reminders(self.db)
         if not pending:
             messagebox.showinfo("Reminders", "No pending reminders right now.")
@@ -584,12 +742,15 @@ class TaskApp(ActionsMixin, tk.Tk):
         RemindersDialog(self, pending, on_ack)
 
     def _reminder_chip(self, t) -> str:
-        from reminders import reminder_chip
+        from .core.reminders import reminder_chip
         return reminder_chip(t, self.db.get("settings", {}))
 
     def check_reminders(self):
         return
 
-if __name__ == "__main__":
+def main():
     app = TaskApp()
     app.mainloop()
+
+if __name__ == "__main__":
+    main()
