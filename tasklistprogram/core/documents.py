@@ -98,7 +98,12 @@ def append_journal_task(title: str, entry_time: datetime | None = None) -> Path:
     top, bottom = _split_sections(content, JOURNAL_DIVIDER)
     timestamp = entry_time.strftime("%H:%M")
     safe_title = title.strip() or "Task completed"
-    line = f"- {timestamp} {safe_title}"
+    header = "## Completed Tasks"
+    line = f"- {timestamp} Completed: {safe_title}"
+    if not bottom:
+        bottom = header
+    elif not bottom.lstrip().startswith(header):
+        bottom = f"{header}\n{bottom}".strip()
     bottom = f"{bottom}\n{line}".strip()
     _write_sections(path, top, bottom, JOURNAL_DIVIDER)
     return path
