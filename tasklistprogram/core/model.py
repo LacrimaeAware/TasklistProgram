@@ -6,8 +6,11 @@ from typing import Optional, Dict, Any, List
 from .dates import parse_stored_due
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-DATA_FILE = ROOT_DIR / "tasks_gui.json"
-BACKUP_FILE = ROOT_DIR / "tasks_gui.json.bak"
+DATA_DIR = ROOT_DIR / "data"
+DATA_FILE = DATA_DIR / "tasks_gui.json"
+BACKUP_FILE = DATA_DIR / "tasks_gui.json.bak"
+LEGACY_DATA_FILE = ROOT_DIR / "tasks_gui.json"
+LEGACY_BACKUP_FILE = ROOT_DIR / "tasks_gui.json.bak"
 
 def _load_json(path: Path):
     with path.open("r", encoding="utf-8") as f:
@@ -23,9 +26,34 @@ def _atomic_write_json(path: Path, payload: dict):
     os.replace(tmp_path, path)
 
 def default_settings():
-    return {"reminders_enabled": True, "reminder_count": 4, "reminder_min_priority": "M"}
+    return {
+        "reminders_enabled": True,
+        "reminder_count": 4,
+        "reminder_min_priority": "M",
+        "hazard_escalation_enabled": False,
+        "mantras_autoshow": True,
+        "min_priority_visible": "L",
+    }
+
+def default_mantras():
+    return [
+        "Protect your sleep.",
+        "Keep it simple and start small.",
+        "Breathe, then act.",
+        "Progress over perfection.",
+    ]
+
+def normalize_settings(settings: dict) -> dict:
+    merged = default_settings()
+    merged.update(settings or {})
+    return merged
 
 def load_db():
+    if not DATA_FILE.exists() and LEGACY_DATA_FILE.exists():
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        LEGACY_DATA_FILE.replace(DATA_FILE)
+        if LEGACY_BACKUP_FILE.exists():
+            LEGACY_BACKUP_FILE.replace(BACKUP_FILE)
     if not DATA_FILE.exists():
         return {"version": 1, "tasks": [], "next_id": 1}
     try:
@@ -37,8 +65,9 @@ def load_db():
             raise
     if "version" not in db:
         db["version"] = 1
-    if "settings" not in db:
-        db["settings"] = default_settings()
+    db["settings"] = normalize_settings(db.get("settings", {}))
+    if "mantras" not in db:
+        db["mantras"] = default_mantras()
     return db
 
 def save_db(db):

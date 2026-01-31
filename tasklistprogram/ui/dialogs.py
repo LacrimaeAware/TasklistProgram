@@ -2,6 +2,18 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from ..core.dates import parse_due_flexible, fmt_due_for_store
 
+def _place_window(window: tk.Toplevel, parent: tk.Misc | None = None) -> None:
+    window.update_idletasks()
+    width = window.winfo_width()
+    height = window.winfo_height()
+    screen_w = window.winfo_screenwidth()
+    screen_h = window.winfo_screenheight()
+    pointer_x = (parent.winfo_pointerx() if parent else window.winfo_pointerx())
+    pointer_y = (parent.winfo_pointery() if parent else window.winfo_pointery())
+    x = max(0, min(pointer_x - width // 2, screen_w - width))
+    y = max(0, min(pointer_y - height // 2, screen_h - height))
+    window.geometry(f"+{x}+{y}")
+
 class EditDialog(tk.Toplevel):
     def __init__(self, master, task, on_save):
         super().__init__(master)
@@ -23,7 +35,10 @@ class EditDialog(tk.Toplevel):
 
         ttk.Label(frm, text="Priority").grid(row=2, column=0, sticky="w")
         self.prio_var = tk.StringVar(value=task.get("priority","M"))
-        ttk.Combobox(frm, textvariable=self.prio_var, state="readonly", values=["H","M","L","D"], width=6)\
+        prio_values = ["H", "M", "L", "D"]
+        if str(task.get("priority", "")).upper() == "U":
+            prio_values = ["U"] + prio_values
+        ttk.Combobox(frm, textvariable=self.prio_var, state="readonly", values=prio_values, width=6)\
             .grid(row=2, column=1, sticky="w", padx=6, pady=4)
 
         ttk.Label(frm, text="Repeat").grid(row=3, column=0, sticky="w")
@@ -48,6 +63,7 @@ class EditDialog(tk.Toplevel):
 
         self.bind("<Return>", lambda e: self.save())
         self.bind("<Escape>", lambda e: self.destroy())
+        _place_window(self, master)
 
     def save(self):
         title = self.title_var.get().strip()
@@ -62,6 +78,8 @@ class EditDialog(tk.Toplevel):
                 messagebox.showerror("Error", "Invalid due format.")
                 return
         prio = self.prio_var.get().upper()
+        if prio == "U" and str(self.task.get("priority", "")).upper() != "U":
+            prio = "H"
         rep = self.rep_var.get()
         if prio == "D":
             rep = "daily"
@@ -94,6 +112,7 @@ class StatsDialog(tk.Toplevel):
         else:
             for title, streak in summary["top_streaks"]:
                 ttk.Label(frm, text=f"  {title} — {streak} days").pack(anchor="w")
+        _place_window(self, master)
 
 
 class SettingsDialog(tk.Toplevel):
@@ -103,7 +122,14 @@ class SettingsDialog(tk.Toplevel):
         self.resizable(False, False)
         self.on_save = on_save
 
-        s = settings or {"reminders_enabled": True, "reminder_count": 4, "reminder_min_priority": "M", "min_priority_visible":"L"}
+        s = settings or {
+            "reminders_enabled": True,
+            "reminder_count": 4,
+            "reminder_min_priority": "M",
+            "min_priority_visible": "L",
+            "hazard_escalation_enabled": False,
+            "mantras_autoshow": True,
+        }
 
         frm = ttk.Frame(self, padding=12)
         frm.grid(row=0, column=0, sticky="nsew")
@@ -129,10 +155,19 @@ class SettingsDialog(tk.Toplevel):
         ttk.Combobox(frm, textvariable=self.minvis_var, values=["H","M","L","D","Misc"], state="readonly", width=8)\
             .grid(row=3, column=1, sticky="w", padx=6, pady=4)
 
+        self.hazard_var = tk.BooleanVar(value=s.get("hazard_escalation_enabled", False))
+        ttk.Checkbutton(frm, text="Enable hazard escalation (skip warnings)", variable=self.hazard_var)\
+            .grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        self.mantra_autoshow_var = tk.BooleanVar(value=s.get("mantras_autoshow", True))
+        ttk.Checkbutton(frm, text="Show mantra at first launch each day", variable=self.mantra_autoshow_var)\
+            .grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
         btns = ttk.Frame(frm)
-        btns.grid(row=4, column=0, columnspan=2, sticky="e", pady=(12,0))
+        btns.grid(row=6, column=0, columnspan=2, sticky="e", pady=(12,0))
         ttk.Button(btns, text="Save", command=self.save).pack(side=tk.LEFT, padx=6)
         ttk.Button(btns, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=6)
+        _place_window(self, master)
 
 
     def save(self):
@@ -140,7 +175,9 @@ class SettingsDialog(tk.Toplevel):
             "reminders_enabled": self.enabled_var.get(),
             "reminder_count": max(1, int(self.count_var.get())),
             "reminder_min_priority": self.minp_var.get(),
-            "min_priority_visible": self.minvis_var.get()
+            "min_priority_visible": self.minvis_var.get(),
+            "hazard_escalation_enabled": self.hazard_var.get(),
+            "mantras_autoshow": self.mantra_autoshow_var.get(),
         }
         self.on_save(data)
         self.destroy()
@@ -170,7 +207,7 @@ class HelpDialog(tk.Toplevel):
                 "Fields explained\n"
                 "• Title: a short label for the task.\n"
                 "• Due: accepts date-only or date+time (see examples below).\n"
-                "• Priority: H/M/L/D/Misc (D = daily habit).\n"
+                "• Priority: H/M/L/D/Misc (D = daily repeat).\n"
                 "• Repeat: none, daily, weekdays, weekly, monthly.\n"
                 "• Notes: free text, useful for details.\n"
                 "• Group: optional label used for grouping in the list.\n\n"
@@ -185,6 +222,7 @@ class HelpDialog(tk.Toplevel):
                 "Tips\n"
                 "• Use Group view to collapse tasks by group.\n"
                 "• Search filters titles and notes.\n"
+                "• Repeating Tasks filter shows all repeating items.\n"
                 "• Group view and filter selections are saved between runs.\n"
             ),
         )
@@ -222,6 +260,7 @@ class HelpDialog(tk.Toplevel):
             command=lambda: self._copy_tab_text(notebook),
         ).pack(side=tk.LEFT)
         ttk.Button(btns, text="Close", command=self.destroy).pack(side=tk.RIGHT)
+        _place_window(self, master)
 
     def _build_text_tab(self, notebook: ttk.Notebook, title: str, content: str) -> ttk.Frame:
         panel = ttk.Frame(notebook, padding=8)
@@ -242,6 +281,69 @@ class HelpDialog(tk.Toplevel):
         self.clipboard_append(txt.get("1.0", "end-1c"))
 
 
+class MantraDialog(tk.Toplevel):
+    def __init__(self, master, mantras: list[str], on_add, on_next, initial: str | None = None):
+        super().__init__(master)
+        self.title("Mantras")
+        self.resizable(False, False)
+        self.mantras = mantras
+        self.on_add = on_add
+        self.on_next = on_next
+
+        frm = ttk.Frame(self, padding=12)
+        frm.pack(fill=tk.BOTH, expand=True)
+
+        self.text_var = tk.StringVar(value=initial or "")
+        label = ttk.Label(frm, textvariable=self.text_var, wraplength=420, justify="center")
+        label.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+
+        btns = ttk.Frame(frm)
+        btns.pack(fill=tk.X)
+        ttk.Button(btns, text="Show another", command=self._show_next).pack(side=tk.LEFT)
+        ttk.Button(btns, text="Add mantra", command=self._add_mantra).pack(side=tk.LEFT, padx=8)
+        ttk.Button(btns, text="Close", command=self.destroy).pack(side=tk.RIGHT)
+        _place_window(self, master)
+
+    def _show_next(self):
+        self.text_var.set(self.on_next())
+
+    def _add_mantra(self):
+        text = self.on_add()
+        if text:
+            self.text_var.set(text)
+
+
+class JournalDialog(tk.Toplevel):
+    def __init__(self, master, on_add_entry, on_open_file):
+        super().__init__(master)
+        self.title("Journal")
+        self.resizable(True, True)
+        self.on_add_entry = on_add_entry
+        self.on_open_file = on_open_file
+
+        frm = ttk.Frame(self, padding=12)
+        frm.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(frm, text="Add journal entry (saved to today's file):").pack(anchor="w")
+        self.txt = tk.Text(frm, width=70, height=6, wrap="word")
+        self.txt.pack(fill=tk.BOTH, expand=True, pady=(6, 10))
+
+        btns = ttk.Frame(frm)
+        btns.pack(fill=tk.X)
+        ttk.Button(btns, text="Add entry", command=self._submit).pack(side=tk.LEFT)
+        ttk.Button(btns, text="Open journal file", command=self.on_open_file).pack(side=tk.LEFT, padx=8)
+        ttk.Button(btns, text="Close", command=self.destroy).pack(side=tk.RIGHT)
+        _place_window(self, master)
+
+    def _submit(self):
+        text = self.txt.get("1.0", "end-1c").strip()
+        if not text:
+            messagebox.showinfo("Journal", "Nothing to add.")
+            return
+        self.on_add_entry(text)
+        self.txt.delete("1.0", "end")
+
+
 class PasteImportDialog(tk.Toplevel):
     def __init__(self, master, on_import_text):
         super().__init__(master)
@@ -260,6 +362,7 @@ class PasteImportDialog(tk.Toplevel):
         btns.pack(fill=tk.X)
         ttk.Button(btns, text="Import", command=self._do_import).pack(side=tk.LEFT)
         ttk.Button(btns, text="Cancel", command=self.destroy).pack(side=tk.RIGHT)
+        _place_window(self, master)
 
     def _do_import(self):
         text = self.txt.get("1.0", "end-1c").strip()
@@ -303,6 +406,7 @@ class RemindersDialog(tk.Toplevel):
         ttk.Button(btns, text="Close", command=self.destroy).pack(side=tk.RIGHT)
 
         self.tree.bind("<Double-1>", lambda e: self.ack_selected())
+        _place_window(self, master)
 
     def ack_selected(self):
         sels = self.tree.selection()

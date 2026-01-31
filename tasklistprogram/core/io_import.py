@@ -97,6 +97,8 @@ def _parse_lines(lines, db):
             "times_completed": 0,
             "history": [],
             "is_deleted": False,
+            "is_suspended": False,
+            "skip_count": 0,
             "group": group.strip(),
         }
         db["tasks"].append(t)

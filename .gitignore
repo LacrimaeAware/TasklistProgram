@@ -179,9 +179,5 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
-tasks_gui.json
-tasks_gui.json.bak
-tasks_gui.json.tmp
+/data
 /import texts
-/tasklistprogram/data
-tasklistprogram/tasks_gui.json

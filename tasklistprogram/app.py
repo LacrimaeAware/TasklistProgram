@@ -5,7 +5,7 @@ from typing import Optional, Tuple, List
 from datetime import datetime, date, timedelta
 
 from .core.dates import parse_due_flexible, fmt_due_for_store, parse_stored_due, next_due
-from .core.model import load_db, save_db, get_task, delete_task, stats_summary
+from .core.model import load_db, save_db, get_task, delete_task, stats_summary, normalize_settings
 from .ui.dialogs import (
     EditDialog,
     StatsDialog,
@@ -13,8 +13,18 @@ from .ui.dialogs import (
     RemindersDialog,
     PasteImportDialog,
     HelpDialog,
+    MantraDialog,
+    JournalDialog,
 )
 from .core.io_import import import_from_string
+from .core.documents import (
+    sync_task_notes,
+    move_task_document_if_needed,
+    open_document,
+    append_journal_task,
+    append_journal_manual,
+    ensure_journal_path,
+)
 
 from .core.actions import ActionsMixin
 
@@ -40,6 +50,15 @@ class TaskApp(ActionsMixin, tk.Tk):
         file_menu.add_command(label="Import Tasks…", command=self.import_tasks)
         file_menu.add_command(label="Import (paste text)…", command=self.import_tasks_paste)
         menubar.add_cascade(label="File", menu=file_menu)
+
+        mantra_menu = tk.Menu(menubar, tearoff=0)
+        mantra_menu.add_command(label="Show Mantra…", command=self.open_mantras)
+        menubar.add_cascade(label="Mantras", menu=mantra_menu)
+
+        journal_menu = tk.Menu(menubar, tearoff=0)
+        journal_menu.add_command(label="Journal…", command=self.open_journal)
+        journal_menu.add_command(label="Open Today's Journal", command=self.open_today_journal)
+        menubar.add_cascade(label="Journal", menu=journal_menu)
 
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="Help / Guide…", command=self.open_help)
@@ -90,13 +109,16 @@ class TaskApp(ActionsMixin, tk.Tk):
         filt = ttk.Frame(self, padding=(8,0,8,8))
         filt.pack(fill=tk.X)
         ttk.Label(filt, text="Filter:").pack(side=tk.LEFT)
-        settings = self.db.get("settings", {})
+        settings = normalize_settings(self.db.get("settings", {}))
+        self.db["settings"] = settings
         default_filter = settings.get("ui_filter_scope", "all")
-        if default_filter not in ["today", "week", "overdue", "habits", "all", "done", "deleted"]:
+        if default_filter == "habits":
+            default_filter = "repeating"
+        if default_filter not in ["today", "week", "overdue", "repeating", "all", "done", "deleted", "suspended"]:
             default_filter = "all"
         self.filter_var = tk.StringVar(value=default_filter)
         fcombo = ttk.Combobox(filt, textvariable=self.filter_var, width=10,
-                              values=["today","week","overdue","habits","all","done","deleted"],
+                              values=["today","week","overdue","repeating","all","done","deleted","suspended"],
                               state="readonly")
         fcombo.pack(side=tk.LEFT, padx=6)
 
@@ -157,9 +179,12 @@ class TaskApp(ActionsMixin, tk.Tk):
             style="Caret.TButton"  # <— add this
         ).pack(side=tk.LEFT, padx=(6, 10))
 
-        ttk.Button(filt, text="Mark Done", command=self.mark_done).pack(side=tk.LEFT, padx=(16, 4))
-        ttk.Button(filt, text="Delete", command=self.soft_delete).pack(side=tk.LEFT, padx=4)
-        ttk.Button(filt, text="Restore", command=self.restore).pack(side=tk.LEFT, padx=4)
+        self.mark_done_btn = ttk.Button(filt, text="Mark Done", command=self.mark_done)
+        self.delete_btn = ttk.Button(filt, text="Delete", command=self.soft_delete)
+        self.suspend_btn = ttk.Button(filt, text="Suspend", command=self.suspend_tasks)
+        self.mark_done_btn.pack(side=tk.LEFT, padx=(16, 4))
+        self.delete_btn.pack(side=tk.LEFT, padx=4)
+        self.suspend_btn.pack(side=tk.LEFT, padx=4)
 
         # === Treeview moved to TaskListView ===
         self.list = TaskListView(self, on_request_edit=self.edit_task, request_refresh=self.refresh)
@@ -177,6 +202,9 @@ class TaskApp(ActionsMixin, tk.Tk):
         self.menu.add_command(label="Delete (soft)", command=self.soft_delete)
         self.menu.add_command(label="Restore", command=self.restore)
         self.menu.add_command(label="Hard Delete…", command=self.hard_delete)
+        self.menu.add_command(label="Suspend", command=self.suspend_tasks)
+        self.menu.add_command(label="Unsuspend", command=self.unsuspend_tasks)
+        self.menu.add_command(label="Open Document…", command=self.open_task_document)
 
         setp = tk.Menu(self.menu, tearoff=0)
         setp.add_command(label="High",   command=lambda: self.set_priority_bulk("H"))
@@ -199,12 +227,14 @@ class TaskApp(ActionsMixin, tk.Tk):
 
         # Attach context menu to the new tree
         self.list.tree.bind("<Button-3>", self.popup_menu)
+        self.list.tree.bind("<<TreeviewSelect>>", lambda e: self._update_action_buttons())
 
         # Initial refresh & schedule resets
         self.refresh()
         self.after(300, self.check_reminders)
         self.reset_repeating_tasks(catchup=True)
         self.schedule_midnight_reset()
+        self.after(600, self._maybe_show_mantra_on_launch)
 
         # Keyboard shortcuts
         self.bind("<Delete>", lambda e: self.soft_delete())
@@ -250,6 +280,7 @@ class TaskApp(ActionsMixin, tk.Tk):
                 else:
                     due_dt = datetime.combine(next_day, datetime.min.time())
                 changed = True
+                self._apply_skip_escalation(t)
                 # loop to catch up multiple missed occurrences
 
             # If task was completed previously and the (possibly-updated) due is today,
@@ -296,6 +327,28 @@ class TaskApp(ActionsMixin, tk.Tk):
         minv_code = 'X' if isinstance(minv, str) and minv.lower() == 'misc' else (minv or 'L').upper()
         return PRIORITY_ORDER.get((p or 'M').upper(), 0) >= PRIORITY_ORDER.get(minv_code, 2)
 
+    def _hazard_enabled(self) -> bool:
+        return bool(self.db.get("settings", {}).get("hazard_escalation_enabled", False))
+
+    def _apply_skip_escalation(self, task: dict) -> None:
+        if not self._hazard_enabled():
+            return
+        if (task.get("repeat") or "none").lower() in ("", "none"):
+            return
+        task["skip_count"] = int(task.get("skip_count", 0)) + 1
+        if task["skip_count"] >= 2 and "base_priority" not in task:
+            task["base_priority"] = task.get("priority", "M")
+        if task["skip_count"] >= 3:
+            task["priority"] = "U"
+        elif task["skip_count"] >= 2:
+            task["priority"] = "H"
+
+    def _display_title(self, task: dict) -> str:
+        title = task.get("title", "")
+        if self._hazard_enabled() and int(task.get("skip_count", 0)) >= 1:
+            return f"⚠ {title}"
+        return title
+
     def _title_candidates(self):
         items = [(t.get("title",""), t.get("times_completed",0)) for t in self.db["tasks"] if t.get("title")]
         items.sort(key=lambda x: (-x[1], x[0].lower()))
@@ -323,7 +376,52 @@ class TaskApp(ActionsMixin, tk.Tk):
         if iid not in current:
             tree.selection_set(iid)
 
+        self._configure_context_menu()
         self.menu.tk_popup(event.x_root, event.y_root)
+
+    def _configure_context_menu(self):
+        self.menu.delete(0, tk.END)
+        self.menu.add_command(label="Edit", command=self.edit_task)
+        selection = self.selected_tasks()
+        show_restore = any(t.get("is_deleted") for t in selection)
+        show_delete = any(not t.get("is_deleted") for t in selection)
+        show_unsuspend = any(t.get("is_suspended") for t in selection)
+        show_suspend = any(not t.get("is_suspended") for t in selection)
+        delete_label = "Restore" if show_restore and not show_delete else "Delete (soft)"
+        delete_cmd = self.restore if delete_label == "Restore" else self.soft_delete
+        suspend_label = "Unsuspend" if show_unsuspend and not show_suspend else "Suspend"
+        suspend_cmd = self.unsuspend_tasks if suspend_label == "Unsuspend" else self.suspend_tasks
+        self.menu.add_command(label=delete_label, command=delete_cmd)
+        self.menu.add_command(label="Hard Delete…", command=self.hard_delete)
+        self.menu.add_command(label=suspend_label, command=suspend_cmd)
+        self.menu.add_command(label="Open Document…", command=self.open_task_document)
+
+    def _update_action_buttons(self):
+        if not hasattr(self, "list"):
+            return
+        selection = self.selected_tasks()
+        has_deleted = any(t.get("is_deleted") for t in selection)
+        has_active = any(not t.get("is_deleted") for t in selection)
+        has_suspended = any(t.get("is_suspended") for t in selection)
+        has_unsuspended = any(not t.get("is_suspended") for t in selection)
+        if has_deleted and not has_active:
+            self.delete_btn.config(text="Restore", command=self.restore, state="normal")
+        else:
+            self.delete_btn.config(text="Delete", command=self.soft_delete, state="normal" if selection else "disabled")
+        if has_suspended and not has_unsuspended:
+            self.suspend_btn.config(text="Unsuspend", command=self.unsuspend_tasks, state="normal")
+        else:
+            self.suspend_btn.config(text="Suspend", command=self.suspend_tasks, state="normal" if selection else "disabled")
+
+    def open_task_document(self):
+        sels = self.selected_tasks()
+        if not sels:
+            return
+        task = sels[0]
+        move_task_document_if_needed(task)
+        path = sync_task_notes(task)
+        save_db(self.db)
+        open_document(path)
 
     # ===== Add & Quick Add =====
     def add_task(self):
@@ -366,10 +464,14 @@ class TaskApp(ActionsMixin, tk.Tk):
             "times_completed": 0,
             "history": [],
             "is_deleted": False,
+            "is_suspended": False,
+            "skip_count": 0,
             "group": ""  # group set via Edit or bulk action
         }
         self.db["tasks"].append(t)
         self.db["next_id"] += 1
+        save_db(self.db)
+        sync_task_notes(t)
         save_db(self.db)
         self.title_var.set(""); self.due_var.set(""); self.notes_txt.delete("1.0", "end")
         self.refresh(select_id=t["id"])
@@ -390,9 +492,13 @@ class TaskApp(ActionsMixin, tk.Tk):
             "times_completed": 0,
             "history": [],
             "is_deleted": False,
+            "is_suspended": False,
+            "skip_count": 0,
             "group": ""
         }
         self.db["tasks"].append(t); self.db["next_id"] += 1
+        save_db(self.db)
+        sync_task_notes(t)
         save_db(self.db)
         self.title_var.set("")
         self.refresh(select_id=t["id"])
@@ -414,6 +520,8 @@ class TaskApp(ActionsMixin, tk.Tk):
             t["notes"] = data["notes"]
             t["group"] = data.get("group","").strip()
             t["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            move_task_document_if_needed(t)
+            sync_task_notes(t)
             save_db(self.db)
             self.refresh(select_id=t["id"])
         EditDialog(self, t, on_save)
@@ -435,6 +543,8 @@ class TaskApp(ActionsMixin, tk.Tk):
             t["notes"] = data["notes"]
             t["group"] = data.get("group","").strip()
             t["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            move_task_document_if_needed(t)
+            sync_task_notes(t)
             save_db(self.db)
             self.refresh(select_id=t["id"])
         EditDialog(self, t, on_save)
@@ -461,7 +571,11 @@ class TaskApp(ActionsMixin, tk.Tk):
     def passes_filter(self, t, scope):
         if scope == "deleted":
             return t.get("is_deleted", False)
+        if scope == "suspended":
+            return t.get("is_suspended", False) and not t.get("is_deleted", False)
         if t.get("is_deleted", False):
+            return False
+        if t.get("is_suspended", False):
             return False
 
         done = bool(t.get("completed_at"))
@@ -477,7 +591,7 @@ class TaskApp(ActionsMixin, tk.Tk):
             return done
         if scope == "all":
             return True
-        if scope == "habits":
+        if scope in ("habits", "repeating"):
             return t.get("repeat") in ("daily", "weekdays", "weekly", "monthly")
         if scope == "overdue":
             return (d and d < now) and not done
@@ -520,11 +634,15 @@ class TaskApp(ActionsMixin, tk.Tk):
 
     def refresh(self, select_id: Optional[int] = None):
         scope = self.filter_var.get()
+        if scope == "habits":
+            scope = "repeating"
         query = self.search_var.get().strip()
         col, asc = self.sort_state
 
         tasks = [t for t in self.db["tasks"] if self.passes_filter(t, scope) and self.search_match(t, query)]
         tasks.sort(key=lambda x: self.sort_key_for(x, col), reverse=not asc)
+        for t in tasks:
+            t["_display_title"] = self._display_title(t)
 
         grouped = bool(self.group_view.get())
 
@@ -550,10 +668,64 @@ class TaskApp(ActionsMixin, tk.Tk):
                     self.list.tree.selection_set(iid)
                     self.list.tree.see(iid)
                     break
+        self._update_action_buttons()
 
     # ===== Stats / Settings / Reminders =====
     def open_help(self, initial_tab: str = "tutorial"):
         HelpDialog(self, initial_tab=initial_tab)
+
+    def open_mantras(self):
+        def _next():
+            return self._pick_random_mantra()
+
+        def _add():
+            text = simpledialog.askstring("Add Mantra", "Enter a new mantra:", parent=self)
+            if text:
+                self.db.setdefault("mantras", []).append(text.strip())
+                save_db(self.db)
+                return text.strip()
+            return None
+
+        MantraDialog(self, self.db.get("mantras", []), on_add=_add, on_next=_next, initial=self._pick_mantra_of_day())
+
+    def _pick_mantra_of_day(self) -> str:
+        mantras = self.db.get("mantras", [])
+        if not mantras:
+            return ""
+        idx = date.today().toordinal() % len(mantras)
+        return mantras[idx]
+
+    def _pick_random_mantra(self) -> str:
+        mantras = self.db.get("mantras", [])
+        if not mantras:
+            return ""
+        import random
+        return random.choice(mantras)
+
+    def _maybe_show_mantra_on_launch(self):
+        settings = self.db.get("settings", {})
+        if not settings.get("mantras_autoshow", True):
+            return
+        today_key = date.today().isoformat()
+        if settings.get("last_mantra_date") == today_key:
+            return
+        settings["last_mantra_date"] = today_key
+        save_db(self.db)
+        self.open_mantras()
+
+    def open_journal(self):
+        def _add_entry(text: str):
+            append_journal_manual(text)
+
+        def _open_file():
+            path = ensure_journal_path()
+            open_document(path)
+
+        JournalDialog(self, on_add_entry=_add_entry, on_open_file=_open_file)
+
+    def open_today_journal(self):
+        path = ensure_journal_path()
+        open_document(path)
 
     def import_tasks_paste(self):
         def _do(text):
@@ -588,7 +760,7 @@ class TaskApp(ActionsMixin, tk.Tk):
 
     def open_settings(self):
         def on_save(s):
-            merged = dict(self.db.get("settings", {}))
+            merged = normalize_settings(self.db.get("settings", {}))
             merged.update(s)
             self.db["settings"] = merged
             save_db(self.db)
