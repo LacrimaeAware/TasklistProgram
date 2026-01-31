@@ -17,8 +17,8 @@ A lightweight task management application built with Python and Tkinter.
 ### Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/LacrimaeAware/TasklistProgram.git
+# Clone the repository (replace with your repository URL)
+git clone https://github.com/YOUR_USERNAME/TasklistProgram.git
 cd TasklistProgram
 
 # Run the application

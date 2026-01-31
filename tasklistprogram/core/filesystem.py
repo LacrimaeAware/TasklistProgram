@@ -19,10 +19,10 @@ def sanitize_folder_name(name: str) -> str:
     if not name:
         return "Untitled"
     
-    # Replace unsafe filesystem characters with underscores
+    # Replace unsafe filesystem characters with spaces
     # Only replace actual problematic characters, NOT normal letters
     unsafe_chars = r'[<>:"/\\|?*\x00-\x1f]'
-    sanitized = re.sub(unsafe_chars, '_', name)
+    sanitized = re.sub(unsafe_chars, ' ', name)
     
     # Collapse multiple spaces/underscores
     sanitized = re.sub(r'[ _]+', ' ', sanitized)
