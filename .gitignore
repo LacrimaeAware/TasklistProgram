@@ -181,3 +181,5 @@ cython_debug/
 .cursorindexingignore
 /data
 /import texts
+tasklistprogram/tasks_gui.json
+/tasklistprogram/data
