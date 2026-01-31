@@ -1,6 +1,6 @@
 # reminders.py
 from datetime import datetime, timedelta
-from dates import parse_stored_due
+from .dates import parse_stored_due
 
 def _checkpoints_between(start: datetime, end: datetime, count: int) -> list[datetime]:
     ONE_DAY = timedelta(days=1)

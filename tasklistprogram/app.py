@@ -4,16 +4,16 @@ import re
 from typing import Optional, Tuple, List
 from datetime import datetime, date, timedelta
 
-from dates import parse_due_flexible, fmt_due_for_store, parse_stored_due, next_due, add_months_dateonly
-from model import load_db, save_db, get_task, delete_task, stats_summary
-from widgets import EditDialog, StatsDialog, SettingsDialog, RemindersDialog, ImportInstructionsDialog, PasteImportDialog
-from io_import import import_from_txt, import_from_string
+from .dates import parse_due_flexible, fmt_due_for_store, parse_stored_due, next_due, add_months_dateonly
+from .model import load_db, save_db, get_task, delete_task, stats_summary
+from .widgets import EditDialog, StatsDialog, SettingsDialog, RemindersDialog, ImportInstructionsDialog, PasteImportDialog
+from .io_import import import_from_txt, import_from_string
 
-from actions import ActionsMixin
+from .actions import ActionsMixin
 
-from listview import TaskListView
-from controls import AutoCompleteEntry
-from constants import PRIORITY_ORDER, PRIO_ICON
+from .listview import TaskListView
+from .controls import AutoCompleteEntry
+from .constants import PRIORITY_ORDER, PRIO_ICON
 
 class TaskApp(ActionsMixin, tk.Tk):
     def __init__(self):
@@ -135,7 +135,7 @@ class TaskApp(ActionsMixin, tk.Tk):
 
         # === Treeview moved to TaskListView ===
         # (local import here so you don't have to touch imports above)
-        from listview import TaskListView
+        from .listview import TaskListView
         self.list = TaskListView(self, on_request_edit=self.edit_task, request_refresh=self.refresh)
 
         # Keep header sort behavior in app.py so sort state stays consistent
@@ -544,7 +544,7 @@ class TaskApp(ActionsMixin, tk.Tk):
         StatsDialog(self, summary)
 
     def import_tasks(self):
-        from io_import import import_from_txt
+        from .io_import import import_from_txt
         path = filedialog.askopenfilename(title="Import tasks",
                                           filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
         if not path: return
@@ -566,7 +566,7 @@ class TaskApp(ActionsMixin, tk.Tk):
         SettingsDialog(self, self.db.get("settings", None), on_save)
 
     def open_reminders(self):
-        from reminders import pending_reminders
+        from .reminders import pending_reminders
         pending = pending_reminders(self.db)
         if not pending:
             messagebox.showinfo("Reminders", "No pending reminders right now.")
@@ -584,12 +584,15 @@ class TaskApp(ActionsMixin, tk.Tk):
         RemindersDialog(self, pending, on_ack)
 
     def _reminder_chip(self, t) -> str:
-        from reminders import reminder_chip
+        from .reminders import reminder_chip
         return reminder_chip(t, self.db.get("settings", {}))
 
     def check_reminders(self):
         return
 
-if __name__ == "__main__":
+def main():
     app = TaskApp()
     app.mainloop()
+
+if __name__ == "__main__":
+    main()

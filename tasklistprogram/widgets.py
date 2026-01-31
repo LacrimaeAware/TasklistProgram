@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Optional
 from datetime import datetime, date, timedelta
-from dates import parse_due_flexible, fmt_due_for_store, parse_stored_due
+from .dates import parse_due_flexible, fmt_due_for_store, parse_stored_due
 
 class EditDialog(tk.Toplevel):
     def __init__(self, master, task, on_save):

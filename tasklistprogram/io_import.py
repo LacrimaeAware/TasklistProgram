@@ -1,7 +1,7 @@
 # io_import.py
 import re
 from datetime import datetime
-from dates import parse_due_flexible, fmt_due_for_store
+from .dates import parse_due_flexible, fmt_due_for_store
 
 VALID_REPEATS = {"none","daily","weekdays","weekly","monthly"}
 VALID_PRIOS = {"H","M","L","D","X","MISC","Misc","misc"}

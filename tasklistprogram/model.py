@@ -1,18 +1,40 @@
-import json, os
+import json
+import os
+from pathlib import Path
 from datetime import datetime, date, timedelta
 from typing import Optional, Dict, Any, List
-from dates import parse_stored_due
+from .dates import parse_stored_due
 
-DATA_FILE = os.path.join(os.path.dirname(__file__), "tasks_gui.json")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+DATA_FILE = ROOT_DIR / "tasks_gui.json"
+BACKUP_FILE = ROOT_DIR / "tasks_gui.json.bak"
+
+def _load_json(path: Path):
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+def _atomic_write_json(path: Path, payload: dict):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+    with tmp_path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
 
 def default_settings():
     return {"reminders_enabled": True, "reminder_count": 4, "reminder_min_priority": "M"}
 
 def load_db():
-    if not os.path.exists(DATA_FILE):
+    if not DATA_FILE.exists():
         return {"version": 1, "tasks": [], "next_id": 1}
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        db = json.load(f)
+    try:
+        db = _load_json(DATA_FILE)
+    except json.JSONDecodeError:
+        if BACKUP_FILE.exists():
+            db = _load_json(BACKUP_FILE)
+        else:
+            raise
     if "version" not in db:
         db["version"] = 1
     if "settings" not in db:
@@ -20,8 +42,12 @@ def load_db():
     return db
 
 def save_db(db):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(db, f, indent=2)
+    if DATA_FILE.exists():
+        try:
+            _atomic_write_json(BACKUP_FILE, _load_json(DATA_FILE))
+        except json.JSONDecodeError:
+            pass
+    _atomic_write_json(DATA_FILE, db)
 
 def get_task(db, tid: int):
     for t in db["tasks"]:
