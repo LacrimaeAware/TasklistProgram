@@ -185,6 +185,10 @@ class TaskApp(ActionsMixin, tk.Tk):
         self.suspend_btn = ttk.Button(filt, text="Suspend", command=self.suspend_tasks)
         self.unsuspend_btn = ttk.Button(filt, text="Unsuspend", command=self.unsuspend_tasks)
         self.mark_done_btn.pack(side=tk.LEFT, padx=(16, 4))
+        self.delete_btn.pack(side=tk.LEFT, padx=4)
+        self.restore_btn.pack(side=tk.LEFT, padx=4)
+        self.suspend_btn.pack(side=tk.LEFT, padx=4)
+        self.unsuspend_btn.pack(side=tk.LEFT, padx=4)
         self._update_action_buttons()
 
         # === Treeview moved to TaskListView ===
