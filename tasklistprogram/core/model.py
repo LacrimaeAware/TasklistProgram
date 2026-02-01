@@ -27,10 +27,10 @@ def _atomic_write_json(path: Path, payload: dict):
 
 def default_settings():
     return {
-        "reminders_enabled": True,
+        "reminders_enabled": False,
         "reminder_count": 4,
         "reminder_min_priority": "M",
-        "hazard_escalation_enabled": False,
+        "hazard_escalation_enabled": True,
         "mantras_autoshow": True,
         "min_priority_visible": "L",
     }

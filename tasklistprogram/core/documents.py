@@ -10,7 +10,7 @@ DATA_DIR = ROOT_DIR / "data"
 TASKS_DIR = DATA_DIR / "task_documents"
 JOURNALS_DIR = DATA_DIR / "journals"
 
-TASK_DIVIDER = "\n---\n"
+TASK_DIVIDER = "\n--- Display notes (shown in app) ↑ | Personal notes (not shown) ↓ ---\n"
 JOURNAL_DIVIDER = "\n---\n"
 
 def _safe_name(value: str, fallback: str) -> str:
@@ -40,8 +40,16 @@ def sync_task_notes(task: dict) -> Path:
     existing = ""
     if path.exists():
         existing = path.read_text(encoding="utf-8")
-    _, bottom = _split_sections(existing, TASK_DIVIDER)
-    top = task.get("notes", "").strip()
+    top, bottom = _split_sections(existing, TASK_DIVIDER)
+    
+    # If the file exists and has top section content, update task notes from file
+    # (user may have edited the display notes section directly)
+    if path.exists() and top:
+        task["notes"] = top
+    else:
+        # Otherwise, write task notes to file
+        top = task.get("notes", "").strip()
+    
     _write_sections(path, top, bottom, TASK_DIVIDER)
     task["doc_path"] = str(path)
     return path
@@ -56,6 +64,16 @@ def move_task_document_if_needed(task: dict) -> Path:
     return desired
 
 def open_document(path: Path) -> None:
+    if sys.platform.startswith("win"):
+        os.startfile(path)  # type: ignore[attr-defined]
+        return
+    if sys.platform == "darwin":
+        subprocess.run(["open", str(path)], check=False)
+        return
+    subprocess.run(["xdg-open", str(path)], check=False)
+
+def open_directory(path: Path) -> None:
+    """Open a directory in the system file explorer."""
     if sys.platform.startswith("win"):
         os.startfile(path)  # type: ignore[attr-defined]
         return
@@ -108,3 +126,11 @@ def append_journal_task(title: str, entry_time: datetime | None = None) -> Path:
     bottom = f"{bottom}\n{line}".strip()
     _write_sections(path, top, bottom, JOURNAL_DIVIDER)
     return path
+
+def get_mantras_file_path() -> Path:
+    """Get the path to the mantras file, creating it if it doesn't exist."""
+    mantras_file = DATA_DIR / "mantras.txt"
+    if not mantras_file.exists():
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        mantras_file.write_text("# Mantras\n# Add your personal mantras here, one per line\n\n", encoding="utf-8")
+    return mantras_file

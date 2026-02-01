@@ -24,6 +24,9 @@ from .core.documents import (
     append_journal_task,
     append_journal_manual,
     ensure_journal_path,
+    open_directory,
+    get_mantras_file_path,
+    DATA_DIR,
 )
 
 from .core.actions import ActionsMixin
@@ -49,10 +52,13 @@ class TaskApp(ActionsMixin, tk.Tk):
         file_menu.add_command(label="Reminders…", command=self.open_reminders)
         file_menu.add_command(label="Import Tasks…", command=self.import_tasks)
         file_menu.add_command(label="Import (paste text)…", command=self.import_tasks_paste)
+        file_menu.add_separator()
+        file_menu.add_command(label="Open Repository Folder", command=self.open_repository_folder)
         menubar.add_cascade(label="File", menu=file_menu)
 
         mantra_menu = tk.Menu(menubar, tearoff=0)
         mantra_menu.add_command(label="Show Mantra…", command=self.open_mantras)
+        mantra_menu.add_command(label="Open Mantra File", command=self.open_mantra_file)
         menubar.add_cascade(label="Mantras", menu=mantra_menu)
 
         journal_menu = tk.Menu(menubar, tearoff=0)
@@ -80,6 +86,26 @@ class TaskApp(ActionsMixin, tk.Tk):
         self.due_var = tk.StringVar()
         due_entry = ttk.Entry(top, textvariable=self.due_var, width=22)
         due_entry.pack(side=tk.LEFT, padx=4)
+        
+        # Add placeholder functionality
+        placeholder_text = "e.g. 2026-02-15, tomorrow, +2d"
+        def on_focus_in(event):
+            if due_entry.cget('foreground') == 'gray':
+                self.due_var.set('')
+                due_entry.config(foreground='black')
+        
+        def on_focus_out(event):
+            if not self.due_var.get():
+                self.due_var.set(placeholder_text)
+                due_entry.config(foreground='gray')
+        
+        # Initialize with placeholder
+        if not self.due_var.get():
+            self.due_var.set(placeholder_text)
+            due_entry.config(foreground='gray')
+        
+        due_entry.bind('<FocusIn>', on_focus_in)
+        due_entry.bind('<FocusOut>', on_focus_out)
 
         ttk.Label(top, text="Priority:").pack(side=tk.LEFT, padx=(8,0))
         self.priority_var = tk.StringVar(value="M")
@@ -464,6 +490,12 @@ class TaskApp(ActionsMixin, tk.Tk):
         title = self.title_var.get().strip()
         if not title: return
         due_s = self.due_var.get().strip()
+        
+        # Check if due_s is the placeholder text
+        placeholder_text = "e.g. 2026-02-15, tomorrow, +2d"
+        if due_s == placeholder_text:
+            due_s = ""
+        
         parsed = None
         if due_s:
             ts = due_s.strip()
@@ -761,6 +793,15 @@ class TaskApp(ActionsMixin, tk.Tk):
 
     def open_today_journal(self):
         path = ensure_journal_path()
+        open_document(path)
+    
+    def open_repository_folder(self):
+        """Open the data directory in the system file explorer."""
+        open_directory(DATA_DIR)
+    
+    def open_mantra_file(self):
+        """Open the mantras file for manual editing."""
+        path = get_mantras_file_path()
         open_document(path)
 
     def import_tasks_paste(self):
