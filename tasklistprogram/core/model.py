@@ -35,14 +35,6 @@ def default_settings():
         "min_priority_visible": "L",
     }
 
-def default_mantras():
-    return [
-        "Protect your sleep.",
-        "Keep it simple and start small.",
-        "Breathe, then act.",
-        "Progress over perfection.",
-    ]
-
 def normalize_settings(settings: dict) -> dict:
     merged = default_settings()
     merged.update(settings or {})
@@ -66,8 +58,6 @@ def load_db():
     if "version" not in db:
         db["version"] = 1
     db["settings"] = normalize_settings(db.get("settings", {}))
-    if "mantras" not in db:
-        db["mantras"] = default_mantras()
     return db
 
 def save_db(db):

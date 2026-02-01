@@ -28,6 +28,7 @@ from .core.documents import (
     get_mantras_file_path,
     read_task_notes_from_file,
     task_doc_path,
+    load_mantras_from_file,
     DATA_DIR,
 )
 
@@ -38,15 +39,14 @@ from .ui.controls import AutoCompleteEntry
 from .core.constants import PRIORITY_ORDER, PRIO_ICON
 
 class TaskApp(ActionsMixin, tk.Tk):
-    # UI constants
-    PLACEHOLDER_COLOR = 'gray'
-    NORMAL_TEXT_COLOR = 'black'
-    
     def __init__(self):
         super().__init__()
         self.title("Tiny Tasklist (Modular)")
         self.geometry("1120x660")
         self.db = load_db()
+        
+        # Track last shown mantra to avoid consecutive duplicates
+        self.last_shown_mantra = None
 
         # Keeps expanded/collapsed state by group name (harmless to keep)
         self.group_state = {}  # {group_name: True/False}
@@ -90,28 +90,8 @@ class TaskApp(ActionsMixin, tk.Tk):
 
         ttk.Label(top, text="Due:").pack(side=tk.LEFT, padx=(8,0))
         self.due_var = tk.StringVar()
-        self.due_entry = ttk.Entry(top, textvariable=self.due_var, width=22)
-        self.due_entry.pack(side=tk.LEFT, padx=4)
-        
-        # Add placeholder functionality
-        self.placeholder_text = "e.g. 2026-02-15, tomorrow, +2d"
-        def on_focus_in(event):
-            if self.due_entry.cget('foreground') == self.PLACEHOLDER_COLOR:
-                self.due_var.set('')
-                self.due_entry.config(foreground=self.NORMAL_TEXT_COLOR)
-        
-        def on_focus_out(event):
-            if not self.due_var.get():
-                self.due_var.set(self.placeholder_text)
-                self.due_entry.config(foreground=self.PLACEHOLDER_COLOR)
-        
-        # Initialize with placeholder
-        if not self.due_var.get():
-            self.due_var.set(self.placeholder_text)
-            self.due_entry.config(foreground=self.PLACEHOLDER_COLOR)
-        
-        self.due_entry.bind('<FocusIn>', on_focus_in)
-        self.due_entry.bind('<FocusOut>', on_focus_out)
+        due_entry = ttk.Entry(top, textvariable=self.due_var, width=22)
+        due_entry.pack(side=tk.LEFT, padx=4)
 
         ttk.Label(top, text="Priority:").pack(side=tk.LEFT, padx=(8,0))
         self.priority_var = tk.StringVar(value="M")
@@ -503,10 +483,6 @@ class TaskApp(ActionsMixin, tk.Tk):
         if not title: return
         due_s = self.due_var.get().strip()
         
-        # Check if due_s is the placeholder text
-        if due_s == self.placeholder_text:
-            due_s = ""
-        
         parsed = None
         if due_s:
             ts = due_s.strip()
@@ -553,8 +529,7 @@ class TaskApp(ActionsMixin, tk.Tk):
         sync_task_notes(t)
         save_db(self.db)
         self.title_var.set("")
-        self.due_var.set(self.placeholder_text)
-        self.due_entry.config(foreground=self.PLACEHOLDER_COLOR)
+        self.due_var.set("")
         self.notes_txt.delete("1.0", "end")
         self.refresh(select_id=t["id"])
 
@@ -758,31 +733,56 @@ class TaskApp(ActionsMixin, tk.Tk):
 
     def open_mantras(self):
         def _next():
-            return self._pick_random_mantra()
+            # Reload mantras from file each time
+            mantra = self._pick_random_mantra()
+            self.last_shown_mantra = mantra
+            return mantra
 
         def _add():
             text = simpledialog.askstring("Add Mantra", "Enter a new mantra:", parent=self)
             if text:
-                self.db.setdefault("mantras", []).append(text.strip())
-                save_db(self.db)
+                # Append to the mantra file
+                path = get_mantras_file_path()
+                current_content = path.read_text(encoding="utf-8")
+                if not current_content.endswith('\n'):
+                    current_content += '\n'
+                path.write_text(current_content + text.strip() + '\n', encoding="utf-8")
                 return text.strip()
             return None
 
-        MantraDialog(self, self.db.get("mantras", []), on_add=_add, on_next=_next, initial=self._pick_mantra_of_day())
+        # Load mantras from file and pick initial one
+        initial = self._pick_mantra_of_day()
+        self.last_shown_mantra = initial
+        # Pass empty list for mantras parameter since we're loading from file
+        MantraDialog(self, [], on_add=_add, on_next=_next, initial=initial)
 
     def _pick_mantra_of_day(self) -> str:
-        mantras = self.db.get("mantras", [])
+        """Pick mantra based on day of year from file."""
+        mantras = load_mantras_from_file()
         if not mantras:
             return ""
         idx = date.today().toordinal() % len(mantras)
         return mantras[idx]
 
     def _pick_random_mantra(self) -> str:
-        mantras = self.db.get("mantras", [])
+        """Pick a random mantra from file, avoiding the last shown one if possible."""
+        mantras = load_mantras_from_file()
         if not mantras:
             return ""
+        
+        # If only one mantra, return it
+        if len(mantras) == 1:
+            return mantras[0]
+        
+        # Filter out the last shown mantra to avoid consecutive duplicates
+        available = [m for m in mantras if m != self.last_shown_mantra]
+        
+        # If all mantras were filtered out (shouldn't happen), use all mantras
+        if not available:
+            available = mantras
+        
         import random
-        return random.choice(mantras)
+        return random.choice(available)
 
     def _maybe_show_mantra_on_launch(self):
         settings = self.db.get("settings", {})

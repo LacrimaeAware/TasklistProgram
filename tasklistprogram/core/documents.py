@@ -140,8 +140,33 @@ def append_journal_task(title: str, entry_time: datetime | None = None) -> Path:
 
 def get_mantras_file_path() -> Path:
     """Get the path to the mantras file, creating it if it doesn't exist."""
-    mantras_file = DATA_DIR / "mantras.txt"
+    mantras_file = DATA_DIR / "mantras.md"
     if not mantras_file.exists():
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        mantras_file.write_text("# Mantras\n# Add your personal mantras here, one per line.\n\n", encoding="utf-8")
+        # Initialize with default mantras
+        default_content = """# Mantras
+
+Add your personal mantras below, one per line.
+Lines starting with # are comments and will be ignored.
+Empty lines are also ignored.
+
+Protect your sleep.
+Keep it simple and start small.
+Breathe, then act.
+Progress over perfection.
+"""
+        mantras_file.write_text(default_content, encoding="utf-8")
     return mantras_file
+
+def load_mantras_from_file() -> list[str]:
+    """Load mantras from the mantras.md file.
+    Returns a list of non-empty, non-comment lines."""
+    path = get_mantras_file_path()
+    content = path.read_text(encoding="utf-8")
+    mantras = []
+    for line in content.splitlines():
+        line = line.strip()
+        # Skip empty lines and comments
+        if line and not line.startswith('#'):
+            mantras.append(line)
+    return mantras
