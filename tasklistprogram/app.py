@@ -26,6 +26,8 @@ from .core.documents import (
     ensure_journal_path,
     open_directory,
     get_mantras_file_path,
+    read_task_notes_from_file,
+    task_doc_path,
     DATA_DIR,
 )
 
@@ -84,28 +86,28 @@ class TaskApp(ActionsMixin, tk.Tk):
 
         ttk.Label(top, text="Due:").pack(side=tk.LEFT, padx=(8,0))
         self.due_var = tk.StringVar()
-        due_entry = ttk.Entry(top, textvariable=self.due_var, width=22)
-        due_entry.pack(side=tk.LEFT, padx=4)
+        self.due_entry = ttk.Entry(top, textvariable=self.due_var, width=22)
+        self.due_entry.pack(side=tk.LEFT, padx=4)
         
         # Add placeholder functionality
-        placeholder_text = "e.g. 2026-02-15, tomorrow, +2d"
+        self.placeholder_text = "e.g. 2026-02-15, tomorrow, +2d"
         def on_focus_in(event):
-            if due_entry.cget('foreground') == 'gray':
+            if self.due_entry.cget('foreground') == 'gray':
                 self.due_var.set('')
-                due_entry.config(foreground='black')
+                self.due_entry.config(foreground='black')
         
         def on_focus_out(event):
             if not self.due_var.get():
-                self.due_var.set(placeholder_text)
-                due_entry.config(foreground='gray')
+                self.due_var.set(self.placeholder_text)
+                self.due_entry.config(foreground='gray')
         
         # Initialize with placeholder
         if not self.due_var.get():
-            self.due_var.set(placeholder_text)
-            due_entry.config(foreground='gray')
+            self.due_var.set(self.placeholder_text)
+            self.due_entry.config(foreground='gray')
         
-        due_entry.bind('<FocusIn>', on_focus_in)
-        due_entry.bind('<FocusOut>', on_focus_out)
+        self.due_entry.bind('<FocusIn>', on_focus_in)
+        self.due_entry.bind('<FocusOut>', on_focus_out)
 
         ttk.Label(top, text="Priority:").pack(side=tk.LEFT, padx=(8,0))
         self.priority_var = tk.StringVar(value="M")
@@ -481,9 +483,13 @@ class TaskApp(ActionsMixin, tk.Tk):
             return
         task = sels[0]
         move_task_document_if_needed(task)
-        path = sync_task_notes(task)
-        save_db(self.db)
-        open_document(path)
+        # Read external changes before opening
+        if read_task_notes_from_file(task):
+            save_db(self.db)
+        else:
+            # If no external changes, ensure file is synced with current notes
+            sync_task_notes(task)
+        open_document(task_doc_path(task))
 
     # ===== Add & Quick Add =====
     def add_task(self):
@@ -492,8 +498,7 @@ class TaskApp(ActionsMixin, tk.Tk):
         due_s = self.due_var.get().strip()
         
         # Check if due_s is the placeholder text
-        placeholder_text = "e.g. 2026-02-15, tomorrow, +2d"
-        if due_s == placeholder_text:
+        if due_s == self.placeholder_text:
             due_s = ""
         
         parsed = None
@@ -541,7 +546,10 @@ class TaskApp(ActionsMixin, tk.Tk):
         save_db(self.db)
         sync_task_notes(t)
         save_db(self.db)
-        self.title_var.set(""); self.due_var.set(""); self.notes_txt.delete("1.0", "end")
+        self.title_var.set("")
+        self.due_var.set(self.placeholder_text)
+        self.due_entry.config(foreground='gray')
+        self.notes_txt.delete("1.0", "end")
         self.refresh(select_id=t["id"])
 
     def quick_add_default(self, event=None):

@@ -36,23 +36,34 @@ def _write_sections(path: Path, top: str, bottom: str, divider: str) -> None:
     path.write_text(body, encoding="utf-8")
 
 def sync_task_notes(task: dict) -> Path:
+    """Write task notes to the document file, preserving the bottom section."""
     path = task_doc_path(task)
     existing = ""
     if path.exists():
         existing = path.read_text(encoding="utf-8")
-    top, bottom = _split_sections(existing, TASK_DIVIDER)
-    
-    # If the file exists and has top section content, update task notes from file
-    # (user may have edited the display notes section directly)
-    if path.exists() and top:
-        task["notes"] = top
-    else:
-        # Otherwise, write task notes to file
-        top = task.get("notes", "").strip()
-    
+    _, bottom = _split_sections(existing, TASK_DIVIDER)
+    top = task.get("notes", "").strip()
     _write_sections(path, top, bottom, TASK_DIVIDER)
     task["doc_path"] = str(path)
     return path
+
+def read_task_notes_from_file(task: dict) -> bool:
+    """Read display notes from the document file and update the task.
+    Returns True if notes were updated, False otherwise."""
+    path = task_doc_path(task)
+    if not path.exists():
+        return False
+    
+    existing = path.read_text(encoding="utf-8")
+    top, bottom = _split_sections(existing, TASK_DIVIDER)
+    
+    # Only update if the file has content
+    if top.strip():
+        current_notes = task.get("notes", "").strip()
+        if top.strip() != current_notes:
+            task["notes"] = top.strip()
+            return True
+    return False
 
 def move_task_document_if_needed(task: dict) -> Path:
     desired = task_doc_path(task)
