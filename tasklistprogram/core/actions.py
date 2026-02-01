@@ -234,8 +234,6 @@ class ActionsMixin:
             else:
                 t["due"] = (dt + timedelta(days=n)).strftime("%Y-%m-%d %H:%M")
             t["bumped_count"] = t.get("bumped_count", 0) + 1
-            if hasattr(self, "_apply_skip_escalation"):
-                self._apply_skip_escalation(t)
         save_db(self.db)
         self.refresh()
 
@@ -253,7 +251,5 @@ class ActionsMixin:
                 # keep simple 30-day month bump for time-of-day tasks
                 t["due"] = (dt + timedelta(days=30)).strftime("%Y-%m-%d %H:%M")
             t["bumped_count"] = t.get("bumped_count", 0) + 1
-            if hasattr(self, "_apply_skip_escalation"):
-                self._apply_skip_escalation(t)
         save_db(self.db)
         self.refresh()

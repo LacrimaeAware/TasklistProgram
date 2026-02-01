@@ -381,7 +381,43 @@ class TaskApp(ActionsMixin, tk.Tk):
 
     def _configure_context_menu(self):
         self.menu.delete(0, tk.END)
-        self.menu.add_command(label="Edit", command=self.edit_task)
+        
+        # Create Edit cascade submenu
+        edit_menu = tk.Menu(self.menu, tearoff=0)
+        edit_menu.add_command(label="Manual Edit", command=self.edit_task)
+        
+        # Set Priority cascade
+        priority_menu = tk.Menu(edit_menu, tearoff=0)
+        priority_menu.add_command(label="High", command=lambda: self.set_priority_bulk("H"))
+        priority_menu.add_command(label="Medium", command=lambda: self.set_priority_bulk("M"))
+        priority_menu.add_command(label="Low", command=lambda: self.set_priority_bulk("L"))
+        priority_menu.add_command(label="Daily", command=lambda: self.set_priority_bulk("D"))
+        priority_menu.add_command(label="Misc", command=lambda: self.set_priority_bulk("X"))
+        edit_menu.add_cascade(label="Set Priority", menu=priority_menu)
+        
+        # Set Repeat cascade
+        repeat_menu = tk.Menu(edit_menu, tearoff=0)
+        repeat_menu.add_command(label="none", command=lambda: self.set_repeat_bulk("none"))
+        repeat_menu.add_command(label="daily", command=lambda: self.set_repeat_bulk("daily"))
+        repeat_menu.add_command(label="weekdays", command=lambda: self.set_repeat_bulk("weekdays"))
+        repeat_menu.add_command(label="weekly", command=lambda: self.set_repeat_bulk("weekly"))
+        repeat_menu.add_command(label="monthly", command=lambda: self.set_repeat_bulk("monthly"))
+        edit_menu.add_cascade(label="Set Repeat", menu=repeat_menu)
+        
+        edit_menu.add_command(label="Set Due…", command=self.set_due_bulk)
+        edit_menu.add_command(label="Set Group…", command=self.set_group_bulk)
+        
+        # Bump cascade
+        bump_menu = tk.Menu(edit_menu, tearoff=0)
+        bump_menu.add_command(label="+1 day", command=lambda: self.bump_days(1))
+        bump_menu.add_command(label="-1 day", command=lambda: self.bump_days(-1))
+        bump_menu.add_command(label="+1 week", command=lambda: self.bump_weeks(1))
+        bump_menu.add_command(label="-1 week", command=lambda: self.bump_weeks(-1))
+        edit_menu.add_cascade(label="Bump", menu=bump_menu)
+        
+        self.menu.add_cascade(label="Edit", menu=edit_menu)
+        
+        # State-aware Delete/Restore and Suspend/Unsuspend
         selection = self.selected_tasks()
         show_restore = any(t.get("is_deleted") for t in selection)
         show_delete = any(not t.get("is_deleted") for t in selection)
