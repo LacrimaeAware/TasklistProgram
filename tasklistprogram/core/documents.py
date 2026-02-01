@@ -10,7 +10,7 @@ DATA_DIR = ROOT_DIR / "data"
 TASKS_DIR = DATA_DIR / "task_documents"
 JOURNALS_DIR = DATA_DIR / "journals"
 
-TASK_DIVIDER = "\n--- Display notes (shown in app) ↑ | Personal notes (not shown) ↓ ---\n"
+TASK_DIVIDER = "\n--- Displayed notes ↑ | Private notes ↓ ---\n"
 JOURNAL_DIVIDER = "\n---\n"
 
 def _safe_name(value: str, fallback: str) -> str:
@@ -57,7 +57,7 @@ def read_task_notes_from_file(task: dict) -> bool:
     existing = path.read_text(encoding="utf-8")
     top, bottom = _split_sections(existing, TASK_DIVIDER)
     
-    # Only update if the file has content
+    # Only update if the file has content and differs from current notes
     if top.strip():
         current_notes = task.get("notes", "").strip()
         if top.strip() != current_notes:
@@ -143,5 +143,5 @@ def get_mantras_file_path() -> Path:
     mantras_file = DATA_DIR / "mantras.txt"
     if not mantras_file.exists():
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        mantras_file.write_text("# Mantras\n# Add your personal mantras here, one per line\n\n", encoding="utf-8")
+        mantras_file.write_text("# Mantras\n# Add your personal mantras here, one per line.\n\n", encoding="utf-8")
     return mantras_file

@@ -38,6 +38,10 @@ from .ui.controls import AutoCompleteEntry
 from .core.constants import PRIORITY_ORDER, PRIO_ICON
 
 class TaskApp(ActionsMixin, tk.Tk):
+    # UI constants
+    PLACEHOLDER_COLOR = 'gray'
+    NORMAL_TEXT_COLOR = 'black'
+    
     def __init__(self):
         super().__init__()
         self.title("Tiny Tasklist (Modular)")
@@ -92,19 +96,19 @@ class TaskApp(ActionsMixin, tk.Tk):
         # Add placeholder functionality
         self.placeholder_text = "e.g. 2026-02-15, tomorrow, +2d"
         def on_focus_in(event):
-            if self.due_entry.cget('foreground') == 'gray':
+            if self.due_entry.cget('foreground') == self.PLACEHOLDER_COLOR:
                 self.due_var.set('')
-                self.due_entry.config(foreground='black')
+                self.due_entry.config(foreground=self.NORMAL_TEXT_COLOR)
         
         def on_focus_out(event):
             if not self.due_var.get():
                 self.due_var.set(self.placeholder_text)
-                self.due_entry.config(foreground='gray')
+                self.due_entry.config(foreground=self.PLACEHOLDER_COLOR)
         
         # Initialize with placeholder
         if not self.due_var.get():
             self.due_var.set(self.placeholder_text)
-            self.due_entry.config(foreground='gray')
+            self.due_entry.config(foreground=self.PLACEHOLDER_COLOR)
         
         self.due_entry.bind('<FocusIn>', on_focus_in)
         self.due_entry.bind('<FocusOut>', on_focus_out)
@@ -485,9 +489,11 @@ class TaskApp(ActionsMixin, tk.Tk):
         move_task_document_if_needed(task)
         # Read external changes before opening
         if read_task_notes_from_file(task):
+            # Save DB only if external changes were detected and applied
             save_db(self.db)
         else:
-            # If no external changes, ensure file is synced with current notes
+            # No external changes, ensure file is synced with current notes
+            # (save_db not needed here as sync_task_notes doesn't modify task)
             sync_task_notes(task)
         open_document(task_doc_path(task))
 
@@ -548,7 +554,7 @@ class TaskApp(ActionsMixin, tk.Tk):
         save_db(self.db)
         self.title_var.set("")
         self.due_var.set(self.placeholder_text)
-        self.due_entry.config(foreground='gray')
+        self.due_entry.config(foreground=self.PLACEHOLDER_COLOR)
         self.notes_txt.delete("1.0", "end")
         self.refresh(select_id=t["id"])
 
