@@ -146,9 +146,12 @@ def get_mantras_file_path() -> Path:
         # Initialize with default mantras
         default_content = """# Mantras
 
-Add your personal mantras below, one per line.
-Lines starting with # are comments and will be ignored.
-Empty lines are also ignored.
+## Instructions
+# Add your personal mantras below, one per line.
+# Lines starting with # are comments and will be ignored.
+# Empty lines are also ignored.
+
+## Your Mantras
 
 Protect your sleep.
 Keep it simple and start small.
