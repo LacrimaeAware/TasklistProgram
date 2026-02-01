@@ -144,14 +144,14 @@ def get_mantras_file_path() -> Path:
     if not mantras_file.exists():
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         # Initialize with default mantras
-        default_content = """# Mantras
+        default_content = """# Your Personal Mantras
 
-## Instructions
-# Add your personal mantras below, one per line.
-# Lines starting with # are comments and will be ignored.
-# Empty lines are also ignored.
-
-## Your Mantras
+<!-- Instructions:
+- Add one mantra per line below
+- Empty lines are ignored
+- Lines starting with # or <!-- are comments and will be ignored
+- Edit this file to add, remove, or modify mantras
+-->
 
 Protect your sleep.
 Keep it simple and start small.
@@ -167,9 +167,22 @@ def load_mantras_from_file() -> list[str]:
     path = get_mantras_file_path()
     content = path.read_text(encoding="utf-8")
     mantras = []
+    in_html_comment = False
+    
     for line in content.splitlines():
-        line = line.strip()
-        # Skip empty lines and comments
-        if line and not line.startswith('#'):
-            mantras.append(line)
+        stripped = line.strip()
+        
+        # Handle HTML comment blocks
+        if '<!--' in stripped:
+            in_html_comment = True
+        if '-->' in stripped:
+            in_html_comment = False
+            continue
+        if in_html_comment:
+            continue
+            
+        # Skip empty lines and markdown comments
+        if stripped and not stripped.startswith('#'):
+            mantras.append(stripped)
+    
     return mantras

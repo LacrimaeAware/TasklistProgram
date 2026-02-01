@@ -753,8 +753,8 @@ class TaskApp(ActionsMixin, tk.Tk):
         # Load mantras from file and pick initial one
         initial = self._pick_mantra_of_day()
         self.last_shown_mantra = initial
-        # Pass empty list for mantras parameter since we're loading from file
-        MantraDialog(self, [], on_add=_add, on_next=_next, initial=initial)
+        # MantraDialog no longer needs mantras parameter - loads from file via callbacks
+        MantraDialog(self, on_add=_add, on_next=_next, initial=initial)
 
     def _pick_mantra_of_day(self) -> str:
         """Pick mantra based on day of year from file."""

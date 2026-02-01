@@ -282,11 +282,10 @@ class HelpDialog(tk.Toplevel):
 
 
 class MantraDialog(tk.Toplevel):
-    def __init__(self, master, mantras: list[str], on_add, on_next, initial: str | None = None):
+    def __init__(self, master, on_add, on_next, initial: str | None = None):
         super().__init__(master)
         self.title("Mantras")
         self.resizable(False, False)
-        self.mantras = mantras
         self.on_add = on_add
         self.on_next = on_next
 

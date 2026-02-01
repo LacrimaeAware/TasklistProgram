@@ -44,9 +44,11 @@ def test_mantras():
     # Test 4: Verify comments are ignored
     print("\n4. Verifying comments are ignored...")
     content = mantra_path.read_text(encoding="utf-8")
-    assert "# Mantras" in content, "Header should be in file"
+    assert "# Your Personal Mantras" in content, "Header should be in file"
+    assert "<!--" in content, "HTML comments should be in file"
     for mantra in mantras:
         assert not mantra.startswith("#"), f"Mantra should not be a comment: {mantra}"
+        assert not mantra.startswith("<!--"), f"Mantra should not be a comment: {mantra}"
     print("   ✓ Comments properly filtered")
     
     print("\n✅ All tests passed!")
