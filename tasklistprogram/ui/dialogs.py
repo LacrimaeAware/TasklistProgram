@@ -247,20 +247,7 @@ class HelpDialog(tk.Toplevel):
         import_tab = self._build_text_tab(
             notebook,
             "Import Instructions",
-            (
-                "Paste or generate tasks in this format (one per line):\n"
-                "  Title | due: <date or time or +rel> | prio: H/M/L/D/Misc | repeat: none/daily/weekdays/weekly/bi-weekly/monthly/custom[:X] | group: <name> | notes: <free text>\n\n"
-                "Shortcuts:\n"
-                "  • Plain text before the first '|' becomes the title.\n"
-                "  • due accepts 'YYYY-MM-DD', 'MM/DD', 'HH:MM', 'HHMM', words like 'tomorrow', 'fri', or '+2d +3h'.\n"
-                "  • prio: H/M/L/D (D forces repeat=daily), or 'Misc'.\n"
-                "  • custom repeat supports either 'repeat: custom:6' (every 6 days) or bare 'repeat: custom' (defaults to none if no number).\n  • Any field is optional. Unknown fields are ignored.\n\n"
-                "Examples:\n"
-                "  Project 1 Due | due: Sept 29 | prio: H | group: CS101 | notes: start early\n"
-                "  Program Assignment 3 Due | due: 09/22 | prio: M | group: CS101\n"
-                "  Midterm Exam | due: 10/13 14:00 | prio: H | group: CS101\n"
-                "  Reflection 2 Due | due: Dec 1 | prio: L | group: CS101\n"
-            ),
+            "Paste or generate tasks in this format (one per line):\n  Title | due: <date or time or +rel> | prio: H/M/L/D/Misc | repeat: none/daily/weekdays/weekly/bi-weekly/monthly/custom:<days> | group: <name> | notes: <free text>\n\nRules and shortcuts:\n  • Plain text before the first '|' becomes the title.\n  • due supports: YYYY-MM-DD, MM/DD, HH:MM, HHMM, weekday words (fri), words (tomorrow), or relative tokens (+2d +3h).\n  • Do NOT mix natural words and relative tokens in one due value (bad: '+1w friday'). Use one style only.\n  • prio: H/M/L/D/Misc (D forces repeat=daily).\n  • repeat: none, daily, weekdays, weekly, bi-weekly, monthly, or custom:<days> (example: custom:6).\n  • custom repeat must include a positive day count in imports.\n  • Group naming style recommendation: Title Case (example: 'Computer Science', 'Life Admin', 'Work Projects').\n  • Any field is optional. Unknown fields are ignored.\n\nExamples by category:\n  Buy groceries\n\n  Reflection 2 Due | due: 2026-12-01 | prio: L | group: Cs101\n  Program Assignment 3 Due | due: 09/22 | prio: M | group: Cs101\n\n  Check in with team | due: 14:30 | prio: M | group: Work\n  Send report | due: 0830 | prio: H | group: Work\n\n  Prepare slides | due: tomorrow | prio: H | group: Work Projects\n  Team sync prep | due: fri | prio: M | group: Work Projects\n\n  Pay rent reminder | due: +5d | prio: H | group: Life Admin\n  Study block | due: +1w | prio: M | group: Cs101\n  Deep work block | due: +2d +3h | prio: M | group: Work\n\n  Daily standup | repeat: daily | prio: D | group: Work\n  Gym | repeat: weekdays | prio: M | group: Health\n  Weekly planning | repeat: weekly | prio: M | group: Work\n  Budget review | repeat: bi-weekly | prio: M | group: Life Admin\n  Rent payment | repeat: monthly | prio: H | group: Life Admin\n  Water plants | repeat: custom:6 | prio: L | group: Home\n\n  Midterm Exam | due: 10/13 14:00 | prio: H | group: Cs101 | notes: Room 204, bring calculator\n  Project 1 Due | due: Sept 29 | prio: H | group: Cs101 | notes: Start early\n",
         )
 
         notebook.add(tutorial, text="Tutorial")
@@ -386,8 +373,16 @@ class PasteImportDialog(tk.Toplevel):
             messagebox.showinfo("Import", "Nothing to import.")
             return
         try:
-            added, failed = self.on_import_text(text)
-            messagebox.showinfo("Import", f"Imported {added} task(s). Failed: {failed}.")
+            added, failed, details = self.on_import_text(text)
+            if failed:
+                preview = "\n".join(f"- {d}" for d in details[:8])
+                extra = "" if len(details) <= 8 else f"\n...and {len(details)-8} more."
+                messagebox.showwarning(
+                    "Import",
+                    f"Imported {added} task(s). Failed: {failed}.\n\nReasons:\n{preview}{extra}"
+                )
+            else:
+                messagebox.showinfo("Import", f"Imported {added} task(s). Failed: {failed}.")
             self.destroy()
         except Exception as e:
             messagebox.showerror("Import failed", str(e))

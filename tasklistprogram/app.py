@@ -124,29 +124,56 @@ class TaskApp(ActionsMixin, tk.Tk):
         # Filter/Search row
         filt = ttk.Frame(self, padding=(8,0,8,8))
         filt.pack(fill=tk.X)
-        ttk.Label(filt, text="Filter:").pack(side=tk.LEFT)
         settings = normalize_settings(self.db.get("settings", {}))
         self.db["settings"] = settings
-        default_filter = settings.get("ui_filter_scope", "all")
-        if default_filter == "habits":
-            default_filter = "repeating"
-        if default_filter not in ["today", "week", "overdue", "repeating", "all", "done", "deleted", "suspended"]:
-            default_filter = "all"
-        self.filter_var = tk.StringVar(value=default_filter)
-        fcombo = ttk.Combobox(filt, textvariable=self.filter_var, width=10,
-                              values=["today","week","overdue","repeating","all","done","deleted","suspended"],
-                              state="readonly")
-        fcombo.pack(side=tk.LEFT, padx=6)
 
-        def _apply_filter(*_):
-            s = self.db.setdefault("settings", {})
-            s["ui_filter_scope"] = self.filter_var.get()
+        ttk.Label(filt, text="Category:").pack(side=tk.LEFT)
+        category_default = settings.get("ui_category_scope", "active")
+        if category_default not in ["active", "repeating", "overdue", "done", "deleted", "suspended", "all"]:
+            category_default = "active"
+        self.category_filter_var = tk.StringVar(value=category_default)
+        category_combo = ttk.Combobox(
+            filt,
+            textvariable=self.category_filter_var,
+            width=10,
+            values=["active", "repeating", "overdue", "done", "deleted", "suspended", "all"],
+            state="readonly",
+        )
+        category_combo.pack(side=tk.LEFT, padx=6)
+
+        ttk.Label(filt, text="Time:").pack(side=tk.LEFT, padx=(8, 0))
+        time_default = settings.get("ui_time_scope", "today")
+        if time_default not in ["any", "today", "week", "month", "custom"]:
+            time_default = "today"
+        self.time_filter_var = tk.StringVar(value=time_default)
+        time_combo = ttk.Combobox(
+            filt,
+            textvariable=self.time_filter_var,
+            width=9,
+            values=["any", "today", "week", "month", "custom"],
+            state="readonly",
+        )
+        time_combo.pack(side=tk.LEFT, padx=6)
+
+        self.custom_time_date = settings.get("ui_time_custom_date", "")
+
+        self.custom_date_btn = ttk.Button(filt, text="Pick date…", command=self.pick_custom_filter_date)
+
+        def _apply_filters(*_):
+            st = self.db.setdefault("settings", {})
+            st["ui_category_scope"] = self.category_filter_var.get()
+            st["ui_time_scope"] = self.time_filter_var.get()
+            st["ui_time_custom_date"] = self.custom_time_date
             save_db(self.db)
+            self._sync_custom_date_button()
             self.refresh()
 
-        fcombo.bind("<<ComboboxSelected>>", _apply_filter)
+        category_combo.bind("<<ComboboxSelected>>", _apply_filters)
+        time_combo.bind("<<ComboboxSelected>>", _apply_filters)
 
-        ttk.Label(filt, text="Search:").pack(side=tk.LEFT, padx=(16,0))
+        self.search_label = ttk.Label(filt, text="Search:")
+        self.search_label.pack(side=tk.LEFT, padx=(16,0))
+        self._sync_custom_date_button()
         self.search_var = tk.StringVar()
         s_entry = ttk.Entry(filt, textvariable=self.search_var, width=34)
         s_entry.pack(side=tk.LEFT, padx=6)
@@ -664,46 +691,109 @@ class TaskApp(ActionsMixin, tk.Tk):
         self.edit_task_for_iid(iid)
 
     # ===== Filter/Search/Sort/Refresh =====
-    def passes_filter(self, t, scope):
-        if scope == "deleted":
-            return t.get("is_deleted", False)
-        if scope == "suspended":
-            return t.get("is_suspended", False) and not t.get("is_deleted", False)
-        if t.get("is_deleted", False):
-            return False
-        if t.get("is_suspended", False):
-            return False
-
-        done = bool(t.get("completed_at"))
-        if done and scope != "done":
+    def passes_filter(self, t, category_scope: str, time_scope: str):
+        if not self._passes_category_filter(t, category_scope):
             return False
         if not self._priority_visible(t.get("priority", "M")):
             return False
+        if not self._passes_time_filter(t, category_scope, time_scope):
+            return False
+        return True
+
+    def _passes_category_filter(self, t, category_scope: str) -> bool:
+        done = bool(t.get("completed_at"))
+        deleted = bool(t.get("is_deleted", False))
+        suspended = bool(t.get("is_suspended", False))
+        repeating = (t.get("repeat") or "").lower() not in ("", "none")
+
+        if category_scope == "deleted":
+            return deleted
+        if category_scope == "suspended":
+            return suspended and not deleted
+        if category_scope == "done":
+            return done and not deleted and not suspended
+
+        if deleted or suspended or done:
+            return False
+
+        if category_scope == "overdue":
+            d = parse_stored_due(t.get("due", "")) if t.get("due") else None
+            return bool(d and d < datetime.now())
+        if category_scope == "repeating":
+            return repeating
+        if category_scope in ("active", "all"):
+            return True
+        return True
+
+    def _passes_time_filter(self, t, category_scope: str, time_scope: str) -> bool:
+        # Archived/status views are category-first and ignore time slicing.
+        if category_scope in ("deleted", "suspended", "done"):
+            return True
 
         d = parse_stored_due(t.get("due", "")) if t.get("due") else None
         now = datetime.now()
 
-        if scope == "done":
-            return done
-        if scope == "all":
+        if time_scope == "any":
             return True
-        if scope in ("habits", "repeating"):
-            return (t.get("repeat") or "").lower() not in ("", "none")
-        if scope == "overdue":
-            return (d and d < now) and not done
-        if scope == "week":
-            if d is None:
-                return False
-            return d <= (now + timedelta(days=7))
-        if scope == "today":
+        if time_scope == "today":
             if not d:
                 return False
-            if d.date() == date.today():
-                return True
-            if d < now and not done:
-                return True
-            return False
+            return d.date() == date.today() or d < now
+        if time_scope == "week":
+            return bool(d and d <= (now + timedelta(days=7)))
+        if time_scope == "month":
+            return bool(d and d <= (now + timedelta(days=30)))
+        if time_scope == "custom":
+            target = self._custom_filter_date()
+            if target is None:
+                return False
+            return bool(d and d.date() <= target)
         return True
+
+    def _custom_filter_date(self):
+        if not self.custom_time_date:
+            return None
+        parsed = parse_due_flexible(self.custom_time_date)
+        if parsed is None:
+            return None
+        if isinstance(parsed, tuple):
+            parsed = parsed[1]
+        return parsed.date()
+
+    def _sync_custom_date_button(self):
+        if self.time_filter_var.get() == "custom":
+            label = self.custom_time_date or "Pick date…"
+            self.custom_date_btn.configure(text=label)
+            self.custom_date_btn.pack(side=tk.LEFT, padx=(0, 6), before=self.search_label)
+        else:
+            self.custom_date_btn.pack_forget()
+
+    def pick_custom_filter_date(self):
+        initial = self.custom_time_date or date.today().isoformat()
+        value = simpledialog.askstring(
+            "Custom Time Filter",
+            "Show tasks due on or before which date?\nUse YYYY-MM-DD (example: 2026-03-15).",
+            parent=self,
+            initialvalue=initial,
+        )
+        if value is None:
+            return
+        value = value.strip()
+        parsed = parse_due_flexible(value)
+        if parsed is None:
+            messagebox.showerror("Custom Time Filter", "Invalid date. Use YYYY-MM-DD or another supported date format.")
+            return
+        if isinstance(parsed, tuple):
+            parsed = parsed[1]
+        self.custom_time_date = parsed.strftime("%Y-%m-%d")
+        self.time_filter_var.set("custom")
+
+        st = self.db.setdefault("settings", {})
+        st["ui_time_scope"] = "custom"
+        st["ui_time_custom_date"] = self.custom_time_date
+        save_db(self.db)
+        self._sync_custom_date_button()
+        self.refresh()
 
     def search_match(self, t, q: str) -> bool:
         if not q: return True
@@ -729,13 +819,15 @@ class TaskApp(ActionsMixin, tk.Tk):
         return 0
 
     def refresh(self, select_id: Optional[int] = None):
-        scope = self.filter_var.get()
-        if scope == "habits":
-            scope = "repeating"
+        category_scope = self.category_filter_var.get()
+        time_scope = self.time_filter_var.get()
         query = self.search_var.get().strip()
         col, asc = self.sort_state
 
-        tasks = [t for t in self.db["tasks"] if self.passes_filter(t, scope) and self.search_match(t, query)]
+        tasks = [
+            t for t in self.db["tasks"]
+            if self.passes_filter(t, category_scope, time_scope) and self.search_match(t, query)
+        ]
         tasks.sort(key=lambda x: self.sort_key_for(x, col), reverse=not asc)
         for t in tasks:
             t["_display_title"] = self._display_title(t)
@@ -744,7 +836,7 @@ class TaskApp(ActionsMixin, tk.Tk):
 
         self.list.render(
             tasks,
-            scope=scope,
+            scope=category_scope,
             prio_icon=PRIO_ICON,
             reminder_chip_fn=self._reminder_chip,
             grouped=grouped,
@@ -859,11 +951,11 @@ class TaskApp(ActionsMixin, tk.Tk):
 
     def import_tasks_paste(self):
         def _do(text):
-            added, failed = import_from_string(text, self.db)
+            added, failed, details = import_from_string(text, self.db, return_details=True)
             if added:
                 save_db(self.db)
                 self.refresh()
-            return added, failed
+            return added, failed, details
 
         PasteImportDialog(self, on_import_text=_do)
 
@@ -877,12 +969,20 @@ class TaskApp(ActionsMixin, tk.Tk):
                                           filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
         if not path: return
         try:
-            added, failed = import_from_txt(path, self.db)
-            save_db(self.db)
-            self.refresh()
+            added, failed, details = import_from_txt(path, self.db, return_details=True)
+            if added:
+                save_db(self.db)
+                self.refresh()
             if failed:
-                messagebox.showwarning("Import",
-                                       f"Imported {added} task(s). Skipped {failed} line(s) with invalid format.")
+                detail_preview = "\n".join(f"- {d}" for d in details[:8])
+                extra = "" if len(details) <= 8 else f"\n...and {len(details)-8} more."
+                messagebox.showwarning(
+                    "Import",
+                    f"Imported {added} task(s). Skipped {failed} line(s).\n\nReasons:\n{detail_preview}{extra}"
+                )
+                print("[import] skipped lines detail:")
+                for d in details:
+                    print("[import]", d)
             else:
                 messagebox.showinfo("Import", f"Imported {added} task(s).")
         except Exception as e:
