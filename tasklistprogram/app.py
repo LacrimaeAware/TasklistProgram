@@ -170,9 +170,10 @@ class TaskApp(ActionsMixin, tk.Tk):
 
         category_combo.bind("<<ComboboxSelected>>", _apply_filters)
         time_combo.bind("<<ComboboxSelected>>", _apply_filters)
-        self._sync_custom_date_button()
 
-        ttk.Label(filt, text="Search:").pack(side=tk.LEFT, padx=(16,0))
+        self.search_label = ttk.Label(filt, text="Search:")
+        self.search_label.pack(side=tk.LEFT, padx=(16,0))
+        self._sync_custom_date_button()
         self.search_var = tk.StringVar()
         s_entry = ttk.Entry(filt, textvariable=self.search_var, width=34)
         s_entry.pack(side=tk.LEFT, padx=6)
@@ -763,7 +764,7 @@ class TaskApp(ActionsMixin, tk.Tk):
         if self.time_filter_var.get() == "custom":
             label = self.custom_time_date or "Pick date…"
             self.custom_date_btn.configure(text=label)
-            self.custom_date_btn.pack(side=tk.LEFT, padx=(0, 6))
+            self.custom_date_btn.pack(side=tk.LEFT, padx=(0, 6), before=self.search_label)
         else:
             self.custom_date_btn.pack_forget()
 
