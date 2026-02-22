@@ -44,9 +44,12 @@ def normalize_settings(settings: dict) -> dict:
 
     legacy_scope = incoming.pop("ui_filter_scope", None)
     if legacy_scope:
-        if legacy_scope in ("today", "week", "overdue"):
+        if legacy_scope in ("today", "week"):
             incoming.setdefault("ui_time_scope", legacy_scope)
             incoming.setdefault("ui_category_scope", "active")
+        elif legacy_scope == "overdue":
+            incoming.setdefault("ui_time_scope", "any")
+            incoming.setdefault("ui_category_scope", "overdue")
         elif legacy_scope in ("all", "repeating"):
             incoming.setdefault("ui_time_scope", "any")
             incoming.setdefault("ui_category_scope", "active" if legacy_scope == "all" else "repeating")

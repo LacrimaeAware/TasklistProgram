@@ -129,28 +129,28 @@ class TaskApp(ActionsMixin, tk.Tk):
 
         ttk.Label(filt, text="Category:").pack(side=tk.LEFT)
         category_default = settings.get("ui_category_scope", "active")
-        if category_default not in ["active", "repeating", "done", "deleted", "suspended", "all"]:
+        if category_default not in ["active", "repeating", "overdue", "done", "deleted", "suspended", "all"]:
             category_default = "active"
         self.category_filter_var = tk.StringVar(value=category_default)
         category_combo = ttk.Combobox(
             filt,
             textvariable=self.category_filter_var,
             width=10,
-            values=["active", "repeating", "done", "deleted", "suspended", "all"],
+            values=["active", "repeating", "overdue", "done", "deleted", "suspended", "all"],
             state="readonly",
         )
         category_combo.pack(side=tk.LEFT, padx=6)
 
         ttk.Label(filt, text="Time:").pack(side=tk.LEFT, padx=(8, 0))
         time_default = settings.get("ui_time_scope", "today")
-        if time_default not in ["any", "today", "week", "month", "custom", "overdue"]:
+        if time_default not in ["any", "today", "week", "month", "custom"]:
             time_default = "today"
         self.time_filter_var = tk.StringVar(value=time_default)
         time_combo = ttk.Combobox(
             filt,
             textvariable=self.time_filter_var,
             width=9,
-            values=["any", "today", "week", "month", "custom", "overdue"],
+            values=["any", "today", "week", "month", "custom"],
             state="readonly",
         )
         time_combo.pack(side=tk.LEFT, padx=6)
@@ -158,7 +158,6 @@ class TaskApp(ActionsMixin, tk.Tk):
         self.custom_time_date = settings.get("ui_time_custom_date", "")
 
         self.custom_date_btn = ttk.Button(filt, text="Pick date…", command=self.pick_custom_filter_date)
-        self.custom_date_btn.pack(side=tk.LEFT, padx=(0, 6))
 
         def _apply_filters(*_):
             st = self.db.setdefault("settings", {})
@@ -716,6 +715,9 @@ class TaskApp(ActionsMixin, tk.Tk):
         if deleted or suspended or done:
             return False
 
+        if category_scope == "overdue":
+            d = parse_stored_due(t.get("due", "")) if t.get("due") else None
+            return bool(d and d < datetime.now())
         if category_scope == "repeating":
             return repeating
         if category_scope in ("active", "all"):
@@ -740,8 +742,6 @@ class TaskApp(ActionsMixin, tk.Tk):
             return bool(d and d <= (now + timedelta(days=7)))
         if time_scope == "month":
             return bool(d and d <= (now + timedelta(days=30)))
-        if time_scope == "overdue":
-            return bool(d and d < now)
         if time_scope == "custom":
             target = self._custom_filter_date()
             if target is None:
@@ -762,9 +762,10 @@ class TaskApp(ActionsMixin, tk.Tk):
     def _sync_custom_date_button(self):
         if self.time_filter_var.get() == "custom":
             label = self.custom_time_date or "Pick date…"
-            self.custom_date_btn.configure(text=f"Custom: {label}", state="normal")
+            self.custom_date_btn.configure(text=label)
+            self.custom_date_btn.pack(side=tk.LEFT, padx=(0, 6))
         else:
-            self.custom_date_btn.configure(text="Pick date…", state="disabled")
+            self.custom_date_btn.pack_forget()
 
     def pick_custom_filter_date(self):
         initial = self.custom_time_date or date.today().isoformat()
