@@ -33,11 +33,28 @@ def default_settings():
         "hazard_escalation_enabled": True,
         "mantras_autoshow": True,
         "min_priority_visible": "L",
+        "ui_category_scope": "active",
+        "ui_time_scope": "today",
+        "ui_time_custom_date": "",
     }
 
 def normalize_settings(settings: dict) -> dict:
     merged = default_settings()
-    merged.update(settings or {})
+    incoming = dict(settings or {})
+
+    legacy_scope = incoming.pop("ui_filter_scope", None)
+    if legacy_scope:
+        if legacy_scope in ("today", "week", "overdue"):
+            incoming.setdefault("ui_time_scope", legacy_scope)
+            incoming.setdefault("ui_category_scope", "active")
+        elif legacy_scope in ("all", "repeating"):
+            incoming.setdefault("ui_time_scope", "any")
+            incoming.setdefault("ui_category_scope", "active" if legacy_scope == "all" else "repeating")
+        elif legacy_scope in ("done", "deleted", "suspended"):
+            incoming.setdefault("ui_time_scope", "any")
+            incoming.setdefault("ui_category_scope", legacy_scope)
+
+    merged.update(incoming)
     return merged
 
 def load_db():
@@ -116,7 +133,7 @@ def stats_summary(db):
 
     streaks = []
     for t in db["tasks"]:
-        if t.get("repeat") in ("daily", "weekdays", "weekly", "monthly"):
+        if (t.get("repeat") or "").lower() not in ("", "none"):
             streaks.append((t["title"], streak_for(t)))
 
     streaks.sort(key=lambda x: x[1], reverse=True)

@@ -203,11 +203,26 @@ def next_due(d: Optional[date], repeat: str) -> Optional[date]:
         while nd.weekday() >= 5:
             nd += timedelta(days=1)
         return nd
-    if repeat == "weekly":
-        return base + timedelta(days=7)
+    interval_days = repeat_interval_days(repeat)
+    if interval_days is not None:
+        return base + timedelta(days=interval_days)
     if repeat == "monthly":
         return month_add(base)
     return base
+
+
+def repeat_interval_days(repeat: Optional[str]) -> Optional[int]:
+    """Return day interval for fixed-day repeat modes, else None."""
+    rep = (repeat or "").strip().lower()
+    if rep == "weekly":
+        return 7
+    if rep in ("bi-weekly", "biweekly"):
+        return 14
+    if rep.startswith("custom:"):
+        raw = rep.split(":", 1)[1].strip()
+        if raw.isdigit() and int(raw) > 0:
+            return int(raw)
+    return None
 
 def add_months_dateonly(d):
     y = d.year

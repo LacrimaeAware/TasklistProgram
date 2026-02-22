@@ -44,7 +44,7 @@ class EditDialog(tk.Toplevel):
         ttk.Label(frm, text="Repeat").grid(row=3, column=0, sticky="w")
         self.rep_var = tk.StringVar(value=task.get("repeat","none"))
         ttk.Combobox(frm, textvariable=self.rep_var, state="readonly",
-                     values=["none","daily","weekdays","weekly","monthly"], width=12)\
+                     values=["none","daily","weekdays","weekly","bi-weekly","monthly","custom"], width=12)\
             .grid(row=3, column=1, sticky="w", padx=6, pady=4)
 
         ttk.Label(frm, text="Group").grid(row=4, column=0, sticky="w")
@@ -55,6 +55,8 @@ class EditDialog(tk.Toplevel):
         self.notes_txt = tk.Text(frm, width=40, height=4)
         self.notes_txt.grid(row=5, column=1, sticky="we", padx=6, pady=4)
         self.notes_txt.insert("1.0", task.get("notes",""))
+
+
 
         btns = ttk.Frame(frm)
         btns.grid(row=6, column=0, columnspan=2, pady=(8,0))
@@ -81,6 +83,16 @@ class EditDialog(tk.Toplevel):
         if prio == "U" and str(self.task.get("priority", "")).upper() != "U":
             prio = "H"
         rep = self.rep_var.get()
+        if rep == "custom":
+            custom_days = simpledialog.askinteger(
+                "Custom Repeat",
+                "Repeat every how many days?",
+                parent=self,
+                minvalue=1,
+            )
+            if custom_days is None:
+                return
+            rep = f"custom:{custom_days}"
         if prio == "D":
             rep = "daily"
         data = {
@@ -163,8 +175,12 @@ class SettingsDialog(tk.Toplevel):
         ttk.Checkbutton(frm, text="Show mantra at first launch each day", variable=self.mantra_autoshow_var)\
             .grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
+        self.reset_hazard_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frm, text="Reset all hazard escalation to baseline on Save", variable=self.reset_hazard_var)\
+            .grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
         btns = ttk.Frame(frm)
-        btns.grid(row=6, column=0, columnspan=2, sticky="e", pady=(12,0))
+        btns.grid(row=7, column=0, columnspan=2, sticky="e", pady=(12,0))
         ttk.Button(btns, text="Save", command=self.save).pack(side=tk.LEFT, padx=6)
         ttk.Button(btns, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=6)
         _place_window(self, master)
@@ -178,6 +194,7 @@ class SettingsDialog(tk.Toplevel):
             "min_priority_visible": self.minvis_var.get(),
             "hazard_escalation_enabled": self.hazard_var.get(),
             "mantras_autoshow": self.mantra_autoshow_var.get(),
+            "reset_hazard_escalation": self.reset_hazard_var.get(),
         }
         self.on_save(data)
         self.destroy()
@@ -208,7 +225,7 @@ class HelpDialog(tk.Toplevel):
                 "• Title: a short label for the task.\n"
                 "• Due: accepts date-only or date+time (see examples below).\n"
                 "• Priority: H/M/L/D/Misc (D = daily repeat).\n"
-                "• Repeat: none, daily, weekdays, weekly, monthly.\n"
+                "• Repeat: none, daily, weekdays, weekly, bi-weekly, monthly, custom (every X days).\n"
                 "• Notes: free text, useful for details.\n"
                 "• Group: optional label used for grouping in the list.\n\n"
                 "Due date formats (examples)\n"
@@ -230,20 +247,7 @@ class HelpDialog(tk.Toplevel):
         import_tab = self._build_text_tab(
             notebook,
             "Import Instructions",
-            (
-                "Paste or generate tasks in this format (one per line):\n"
-                "  Title | due: <date or time or +rel> | prio: H/M/L/D/Misc | repeat: none/daily/weekdays/weekly/monthly | group: <name> | notes: <free text>\n\n"
-                "Shortcuts:\n"
-                "  • Plain text before the first '|' becomes the title.\n"
-                "  • due accepts 'YYYY-MM-DD', 'MM/DD', 'HH:MM', 'HHMM', words like 'tomorrow', 'fri', or '+2d +3h'.\n"
-                "  • prio: H/M/L/D (D forces repeat=daily), or 'Misc'.\n"
-                "  • Any field is optional. Unknown fields are ignored.\n\n"
-                "Examples:\n"
-                "  Project 1 Due | due: Sept 29 | prio: H | group: CS101 | notes: start early\n"
-                "  Program Assignment 3 Due | due: 09/22 | prio: M | group: CS101\n"
-                "  Midterm Exam | due: 10/13 14:00 | prio: H | group: CS101\n"
-                "  Reflection 2 Due | due: Dec 1 | prio: L | group: CS101\n"
-            ),
+            "Paste or generate tasks in this format (one per line):\n  Title | due: <date or time or +rel> | prio: H/M/L/D/Misc | repeat: none/daily/weekdays/weekly/bi-weekly/monthly/custom:<days> | group: <name> | notes: <free text>\n\nRules and shortcuts:\n  • Plain text before the first '|' becomes the title.\n  • due supports: YYYY-MM-DD, MM/DD, HH:MM, HHMM, weekday words (fri), words (tomorrow), or relative tokens (+2d +3h).\n  • Do NOT mix natural words and relative tokens in one due value (bad: '+1w friday'). Use one style only.\n  • prio: H/M/L/D/Misc (D forces repeat=daily).\n  • repeat: none, daily, weekdays, weekly, bi-weekly, monthly, or custom:<days> (example: custom:6).\n  • custom repeat must include a positive day count in imports.\n  • Group naming style recommendation: Title Case (example: 'Computer Science', 'Life Admin', 'Work Projects').\n  • Any field is optional. Unknown fields are ignored.\n\nExamples by category:\n  Buy groceries\n\n  Reflection 2 Due | due: 2026-12-01 | prio: L | group: Cs101\n  Program Assignment 3 Due | due: 09/22 | prio: M | group: Cs101\n\n  Check in with team | due: 14:30 | prio: M | group: Work\n  Send report | due: 0830 | prio: H | group: Work\n\n  Prepare slides | due: tomorrow | prio: H | group: Work Projects\n  Team sync prep | due: fri | prio: M | group: Work Projects\n\n  Pay rent reminder | due: +5d | prio: H | group: Life Admin\n  Study block | due: +1w | prio: M | group: Cs101\n  Deep work block | due: +2d +3h | prio: M | group: Work\n\n  Daily standup | repeat: daily | prio: D | group: Work\n  Gym | repeat: weekdays | prio: M | group: Health\n  Weekly planning | repeat: weekly | prio: M | group: Work\n  Budget review | repeat: bi-weekly | prio: M | group: Life Admin\n  Rent payment | repeat: monthly | prio: H | group: Life Admin\n  Water plants | repeat: custom:6 | prio: L | group: Home\n\n  Midterm Exam | due: 10/13 14:00 | prio: H | group: Cs101 | notes: Room 204, bring calculator\n  Project 1 Due | due: Sept 29 | prio: H | group: Cs101 | notes: Start early\n",
         )
 
         notebook.add(tutorial, text="Tutorial")
@@ -369,8 +373,16 @@ class PasteImportDialog(tk.Toplevel):
             messagebox.showinfo("Import", "Nothing to import.")
             return
         try:
-            added, failed = self.on_import_text(text)
-            messagebox.showinfo("Import", f"Imported {added} task(s). Failed: {failed}.")
+            added, failed, details = self.on_import_text(text)
+            if failed:
+                preview = "\n".join(f"- {d}" for d in details[:8])
+                extra = "" if len(details) <= 8 else f"\n...and {len(details)-8} more."
+                messagebox.showwarning(
+                    "Import",
+                    f"Imported {added} task(s). Failed: {failed}.\n\nReasons:\n{preview}{extra}"
+                )
+            else:
+                messagebox.showinfo("Import", f"Imported {added} task(s). Failed: {failed}.")
             self.destroy()
         except Exception as e:
             messagebox.showerror("Import failed", str(e))
