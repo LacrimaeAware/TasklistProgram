@@ -39,6 +39,8 @@ from .ui.controls import AutoCompleteEntry
 from .core.constants import PRIORITY_ORDER, PRIO_ICON
 
 class TaskApp(ActionsMixin, tk.Tk):
+    REPEAT_OPTIONS = ["none", "daily", "weekdays", "weekly", "bi-weekly", "monthly", "custom"]
+
     def __init__(self):
         super().__init__()
         self.title("Tiny Tasklist (Modular)")
@@ -103,8 +105,10 @@ class TaskApp(ActionsMixin, tk.Tk):
         ttk.Label(top, text="Repeat:").pack(side=tk.LEFT, padx=(8,0))
         self.repeat_var = tk.StringVar(value="none")
         repeat_combo = ttk.Combobox(top, textvariable=self.repeat_var, width=10,
-                                    values=["none","daily","weekdays","weekly","monthly"], state="readonly")
+                                    values=self.REPEAT_OPTIONS, state="readonly")
         repeat_combo.pack(side=tk.LEFT, padx=4)
+        repeat_combo.bind("<<ComboboxSelected>>", self._on_repeat_selected)
+        self.repeat_combo = repeat_combo
 
         self.notes_txt = tk.Text(top, width=32, height=2, wrap="word")
         self.notes_txt.pack(side=tk.LEFT, padx=(8, 4))
@@ -227,7 +231,7 @@ class TaskApp(ActionsMixin, tk.Tk):
         self.menu.add_cascade(label="Set Priority", menu=setp)
 
         setr = tk.Menu(self.menu, tearoff=0)
-        for rlab, rval in [("none","none"),("daily","daily"),("weekdays","weekdays"),("weekly","weekly"),("monthly","monthly")]:
+        for rlab, rval in [("none","none"),("daily","daily"),("weekdays","weekdays"),("weekly","weekly"),("bi-weekly","bi-weekly"),("monthly","monthly"),("custom…","custom")]:
             setr.add_command(label=rlab, command=lambda v=rval: self.set_repeat_bulk(v))
         self.menu.add_cascade(label="Set Repeat", menu=setr)
 
@@ -333,6 +337,24 @@ class TaskApp(ActionsMixin, tk.Tk):
         if str(raw).upper() == "D":
             self.repeat_var.set("daily")
 
+    def _on_repeat_selected(self, event=None):
+        selected = (self.repeat_var.get() or "none").strip().lower()
+        if selected != "custom":
+            return
+        custom_value = self._prompt_custom_repeat_days()
+        if custom_value is None:
+            self.repeat_var.set("none")
+            return
+        self.repeat_var.set(f"custom:{custom_value}")
+
+    def _prompt_custom_repeat_days(self):
+        return simpledialog.askinteger(
+            "Custom Repeat",
+            "Repeat every how many days?\n\nExample: 6 means repeats every 6 days.",
+            parent=self,
+            minvalue=1,
+        )
+
     def _priority_visible(self, p: str) -> bool:
         s = self.db.get('settings', {})
         minv = s.get('min_priority_visible', 'L')
@@ -354,6 +376,21 @@ class TaskApp(ActionsMixin, tk.Tk):
             task["priority"] = "U"
         elif task["skip_count"] >= 2:
             task["priority"] = "H"
+
+    def reset_hazard_escalation(self):
+        changed = False
+        for t in self.db.get("tasks", []):
+            if int(t.get("skip_count", 0)) != 0:
+                t["skip_count"] = 0
+                changed = True
+            if "base_priority" in t:
+                t["priority"] = t.get("base_priority", t.get("priority", "M"))
+                t.pop("base_priority", None)
+                changed = True
+        if changed:
+            save_db(self.db)
+            self.refresh()
+        messagebox.showinfo("Hazard Escalation", "Hazard escalation has been reset for all tasks.")
 
     def _display_title(self, task: dict) -> str:
         title = task.get("title", "")
@@ -413,7 +450,9 @@ class TaskApp(ActionsMixin, tk.Tk):
         repeat_menu.add_command(label="daily", command=lambda: self.set_repeat_bulk("daily"))
         repeat_menu.add_command(label="weekdays", command=lambda: self.set_repeat_bulk("weekdays"))
         repeat_menu.add_command(label="weekly", command=lambda: self.set_repeat_bulk("weekly"))
+        repeat_menu.add_command(label="bi-weekly", command=lambda: self.set_repeat_bulk("bi-weekly"))
         repeat_menu.add_command(label="monthly", command=lambda: self.set_repeat_bulk("monthly"))
+        repeat_menu.add_command(label="custom…", command=lambda: self.set_repeat_bulk("custom"))
         edit_menu.add_cascade(label="Set Repeat", menu=repeat_menu)
         
         edit_menu.add_command(label="Set Due…", command=self.set_due_bulk)
@@ -649,7 +688,7 @@ class TaskApp(ActionsMixin, tk.Tk):
         if scope == "all":
             return True
         if scope in ("habits", "repeating"):
-            return t.get("repeat") in ("daily", "weekdays", "weekly", "monthly")
+            return (t.get("repeat") or "").lower() not in ("", "none")
         if scope == "overdue":
             return (d and d < now) and not done
         if scope == "week":
@@ -852,9 +891,12 @@ class TaskApp(ActionsMixin, tk.Tk):
     def open_settings(self):
         def on_save(s):
             merged = normalize_settings(self.db.get("settings", {}))
+            reset_requested = bool(s.pop("reset_hazard_escalation", False))
             merged.update(s)
             self.db["settings"] = merged
             save_db(self.db)
+            if reset_requested:
+                self.reset_hazard_escalation()
         SettingsDialog(self, self.db.get("settings", None), on_save)
 
     def open_reminders(self):

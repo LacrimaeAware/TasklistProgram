@@ -44,7 +44,7 @@ class EditDialog(tk.Toplevel):
         ttk.Label(frm, text="Repeat").grid(row=3, column=0, sticky="w")
         self.rep_var = tk.StringVar(value=task.get("repeat","none"))
         ttk.Combobox(frm, textvariable=self.rep_var, state="readonly",
-                     values=["none","daily","weekdays","weekly","monthly"], width=12)\
+                     values=["none","daily","weekdays","weekly","bi-weekly","monthly","custom"], width=12)\
             .grid(row=3, column=1, sticky="w", padx=6, pady=4)
 
         ttk.Label(frm, text="Group").grid(row=4, column=0, sticky="w")
@@ -55,6 +55,8 @@ class EditDialog(tk.Toplevel):
         self.notes_txt = tk.Text(frm, width=40, height=4)
         self.notes_txt.grid(row=5, column=1, sticky="we", padx=6, pady=4)
         self.notes_txt.insert("1.0", task.get("notes",""))
+
+
 
         btns = ttk.Frame(frm)
         btns.grid(row=6, column=0, columnspan=2, pady=(8,0))
@@ -81,6 +83,16 @@ class EditDialog(tk.Toplevel):
         if prio == "U" and str(self.task.get("priority", "")).upper() != "U":
             prio = "H"
         rep = self.rep_var.get()
+        if rep == "custom":
+            custom_days = simpledialog.askinteger(
+                "Custom Repeat",
+                "Repeat every how many days?",
+                parent=self,
+                minvalue=1,
+            )
+            if custom_days is None:
+                return
+            rep = f"custom:{custom_days}"
         if prio == "D":
             rep = "daily"
         data = {
@@ -163,8 +175,12 @@ class SettingsDialog(tk.Toplevel):
         ttk.Checkbutton(frm, text="Show mantra at first launch each day", variable=self.mantra_autoshow_var)\
             .grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
+        self.reset_hazard_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frm, text="Reset all hazard escalation to baseline on Save", variable=self.reset_hazard_var)\
+            .grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
         btns = ttk.Frame(frm)
-        btns.grid(row=6, column=0, columnspan=2, sticky="e", pady=(12,0))
+        btns.grid(row=7, column=0, columnspan=2, sticky="e", pady=(12,0))
         ttk.Button(btns, text="Save", command=self.save).pack(side=tk.LEFT, padx=6)
         ttk.Button(btns, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=6)
         _place_window(self, master)
@@ -178,6 +194,7 @@ class SettingsDialog(tk.Toplevel):
             "min_priority_visible": self.minvis_var.get(),
             "hazard_escalation_enabled": self.hazard_var.get(),
             "mantras_autoshow": self.mantra_autoshow_var.get(),
+            "reset_hazard_escalation": self.reset_hazard_var.get(),
         }
         self.on_save(data)
         self.destroy()
@@ -208,7 +225,7 @@ class HelpDialog(tk.Toplevel):
                 "• Title: a short label for the task.\n"
                 "• Due: accepts date-only or date+time (see examples below).\n"
                 "• Priority: H/M/L/D/Misc (D = daily repeat).\n"
-                "• Repeat: none, daily, weekdays, weekly, monthly.\n"
+                "• Repeat: none, daily, weekdays, weekly, bi-weekly, monthly, custom (every X days).\n"
                 "• Notes: free text, useful for details.\n"
                 "• Group: optional label used for grouping in the list.\n\n"
                 "Due date formats (examples)\n"
@@ -232,12 +249,12 @@ class HelpDialog(tk.Toplevel):
             "Import Instructions",
             (
                 "Paste or generate tasks in this format (one per line):\n"
-                "  Title | due: <date or time or +rel> | prio: H/M/L/D/Misc | repeat: none/daily/weekdays/weekly/monthly | group: <name> | notes: <free text>\n\n"
+                "  Title | due: <date or time or +rel> | prio: H/M/L/D/Misc | repeat: none/daily/weekdays/weekly/bi-weekly/monthly/custom[:X] | group: <name> | notes: <free text>\n\n"
                 "Shortcuts:\n"
                 "  • Plain text before the first '|' becomes the title.\n"
                 "  • due accepts 'YYYY-MM-DD', 'MM/DD', 'HH:MM', 'HHMM', words like 'tomorrow', 'fri', or '+2d +3h'.\n"
                 "  • prio: H/M/L/D (D forces repeat=daily), or 'Misc'.\n"
-                "  • Any field is optional. Unknown fields are ignored.\n\n"
+                "  • custom repeat supports either 'repeat: custom:6' (every 6 days) or bare 'repeat: custom' (defaults to none if no number).\n  • Any field is optional. Unknown fields are ignored.\n\n"
                 "Examples:\n"
                 "  Project 1 Due | due: Sept 29 | prio: H | group: CS101 | notes: start early\n"
                 "  Program Assignment 3 Due | due: 09/22 | prio: M | group: CS101\n"

@@ -116,7 +116,7 @@ def stats_summary(db):
 
     streaks = []
     for t in db["tasks"]:
-        if t.get("repeat") in ("daily", "weekdays", "weekly", "monthly"):
+        if (t.get("repeat") or "").lower() not in ("", "none"):
             streaks.append((t["title"], streak_for(t)))
 
     streaks.sort(key=lambda x: x[1], reverse=True)

@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from .dates import parse_due_flexible, fmt_due_for_store
 
-VALID_REPEATS = {"none","daily","weekdays","weekly","monthly"}
+VALID_REPEATS = {"none","daily","weekdays","weekly","bi-weekly","monthly"}
 VALID_PRIOS = {"H","M","L","D","X","MISC","Misc","misc"}
 
 def _parse_lines(lines, db):
@@ -82,7 +82,10 @@ def _parse_lines(lines, db):
         if prio not in VALID_PRIOS:
             prio = "X" if prio.upper() == "MISC" else "M"
         prio = ("X" if prio.upper()=="MISC" else prio.upper())
-        if rep not in VALID_REPEATS:
+        if rep.startswith("custom:"):
+            raw = rep.split(":", 1)[1].strip()
+            rep = f"custom:{int(raw)}" if raw.isdigit() and int(raw) > 0 else "none"
+        elif rep not in VALID_REPEATS:
             rep = "none"
 
         t = {

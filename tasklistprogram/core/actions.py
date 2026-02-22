@@ -118,9 +118,15 @@ class ActionsMixin:
             self.refresh()
 
     def set_repeat_bulk(self, rep: str):
+        target_rep = rep
+        if rep == "custom":
+            days = self._prompt_custom_repeat_days()
+            if days is None:
+                return
+            target_rep = f"custom:{days}"
         changed = False
         for t in self.selected_tasks():
-            t["repeat"] = rep
+            t["repeat"] = target_rep
             changed = True
         if changed:
             save_db(self.db)
