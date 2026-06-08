@@ -1,6 +1,7 @@
 # reminders.py
 from datetime import datetime, timedelta
 from .dates import parse_stored_due
+from .constants import priority_rank
 
 def _checkpoints_between(start: datetime, end: datetime, count: int) -> list[datetime]:
     ONE_DAY = timedelta(days=1)
@@ -27,15 +28,14 @@ def pending_reminders(db: dict, now: datetime | None = None) -> list[dict]:
         return []
 
     count = max(1, int(s.get("reminder_count", 4)))
-    minp = (s.get("reminder_min_priority","M") or "M").upper()
-    order = {"H":3,"M":2,"L":1,"D":0}
+    min_rank = priority_rank(s.get("reminder_min_priority", "M"))
     rows = []
 
     for t in db["tasks"]:
         if t.get("is_deleted") or t.get("completed_at"):
             continue
         p = (t.get("priority","M") or "M").upper()
-        if order.get(p,0) < order.get(minp,2):
+        if priority_rank(p) < min_rank:
             continue
 
         d = parse_stored_due(t.get("due",""))
@@ -76,11 +76,7 @@ def reminder_chip(t: dict, settings: dict | None = None, now: datetime | None = 
     if not s.get("reminders_enabled", True):
         return ""
 
-    order = {"H":3,"M":2,"L":1,"D":1,"X":0}
-    minp = s.get("reminder_min_priority","M")
-    minp_code = "X" if isinstance(minp, str) and str(minp).lower()=="misc" else (minp or "M").upper()
-    pcode = (t.get("priority","M") or "M").upper()
-    if order.get(pcode,0) < order.get(minp_code,2):
+    if priority_rank(t.get("priority", "M")) < priority_rank(s.get("reminder_min_priority", "M")):
         return ""
 
     d = parse_stored_due(t.get("due","")) if t.get("due") else None

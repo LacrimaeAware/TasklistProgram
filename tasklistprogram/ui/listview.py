@@ -3,6 +3,8 @@ import tkinter as tk
 from tkinter import ttk
 import tkinter.font as tkfont
 
+from . import theme
+
 class TaskListView:
     # TITLE first so group headers are flush-left; ID last
     COLS = ("title","due","rem","prio","rep","notes","times","id")
@@ -14,10 +16,11 @@ class TaskListView:
     COL_MIN = {"title":240,"due":140,"rem":36,"prio":70,"rep":90,"notes":160,"times":60,"id":40}
     COL_MAX = {"title":740,"due":260,"rem":60,"prio":110,"rep":160,"notes":420,"times":90,"id":70}
 
-    def __init__(self, master, on_request_edit, request_refresh):
+    def __init__(self, master, on_request_edit, request_refresh, palette=None):
         self.master = master
         self.on_request_edit = on_request_edit
         self.request_refresh = request_refresh
+        self.palette = palette or theme.LIGHT
 
         # Expansion state
         self._expanded = {"_UNGROUPED_": True}
@@ -42,17 +45,26 @@ class TaskListView:
         self._default_font = tkfont.nametofont("TkDefaultFont")
         self._group_font = self._default_font.copy()
         self._group_font.configure(size=max(9, self._default_font.cget("size")), weight="bold")
-        self.tree.tag_configure("prio_U", background="#ffb3b3")
-        self.tree.tag_configure("prio_H", background="#ffe0e0")
-        self.tree.tag_configure("prio_M", background="#ffd8a8")
-        self.tree.tag_configure("prio_L", background="#fff59d")
-        self.tree.tag_configure("prio_D", background="#e6ffe6")
-        self.tree.tag_configure("prio_X", background="#e0f0ff")
-        self.tree.tag_configure("deleted", foreground="#888888")
-        self.tree.tag_configure("suspended", foreground="#888888")
-        self.tree.tag_configure("group_header", background="#eef3ff", foreground="#222", font=self._group_font)
+        self.apply_palette(self.palette)
 
         self.tree.bind("<Double-1>", self._on_double_click)
+
+    def apply_palette(self, palette):
+        """(Re)configure row/tag colors from a theme palette. Safe to call on toggle."""
+        self.palette = palette
+        prio = palette["prio"]
+        for code in ("U", "H", "M", "L", "D", "X"):
+            self.tree.tag_configure(f"prio_{code}", background=prio[code])
+        # Configured after the priority tags so the muted foreground wins for these rows.
+        self.tree.tag_configure("deleted", foreground=palette["muted_fg"])
+        self.tree.tag_configure("suspended", foreground=palette["muted_fg"])
+        # Neutral header bar so group rows never read as a colored (esp. blue Misc) task row.
+        self.tree.tag_configure(
+            "group_header",
+            background=palette["group_bg"],
+            foreground=palette["group_fg"],
+            font=self._group_font,
+        )
 
     # ----- selection helpers -----
     def selected_task_ids(self):

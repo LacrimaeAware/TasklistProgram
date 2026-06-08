@@ -2,11 +2,14 @@ import os
 from pathlib import Path
 from datetime import datetime, date
 import re
+import random
 import subprocess
 import sys
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT_DIR / "data"
+# Honor the same data-dir override as core.model (see TINYTASKLIST_DATA_DIR).
+_ENV_DATA_DIR = os.environ.get("TINYTASKLIST_DATA_DIR")
+DATA_DIR = Path(_ENV_DATA_DIR) if _ENV_DATA_DIR else (ROOT_DIR / "data")
 TASKS_DIR = DATA_DIR / "task_documents"
 JOURNALS_DIR = DATA_DIR / "journals"
 
@@ -184,5 +187,23 @@ def load_mantras_from_file() -> list[str]:
         # Skip empty lines and markdown comments
         if stripped and not stripped.startswith('#'):
             mantras.append(stripped)
-    
+
     return mantras
+
+def pick_mantra_of_day(today: date | None = None) -> str:
+    """Deterministic 'mantra of the day' based on the date's ordinal."""
+    mantras = load_mantras_from_file()
+    if not mantras:
+        return ""
+    today = today or date.today()
+    return mantras[today.toordinal() % len(mantras)]
+
+def pick_random_mantra(last: str | None = None) -> str:
+    """A random mantra, avoiding an immediate repeat of ``last`` when possible."""
+    mantras = load_mantras_from_file()
+    if not mantras:
+        return ""
+    if len(mantras) == 1:
+        return mantras[0]
+    available = [m for m in mantras if m != last] or mantras
+    return random.choice(available)

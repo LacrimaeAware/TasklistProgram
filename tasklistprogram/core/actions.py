@@ -1,18 +1,20 @@
 # actions_mixin.py
+import logging
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
-import re
 from datetime import date, datetime, timedelta
 
-from .dates import parse_due_flexible, fmt_due_for_store, parse_stored_due, add_months_dateonly, next_due
+from .dates import parse_due_entry, fmt_due_for_store, parse_stored_due, add_months_dateonly, next_due
 from .model import save_db
 from .documents import append_journal_task
 from ..ui.controls import AutoCompleteEntry
 
+logger = logging.getLogger(__name__)
+
 class ActionsMixin:
     def mark_done(self):
         sel_ids = [t["id"] for t in self.selected_tasks()]
-        print("[mark_done] selected ids:", sel_ids)
+        logger.debug("mark_done selected ids: %s", sel_ids)
 
         for t in self.selected_tasks():
             before_due = t.get("due", "")
@@ -46,8 +48,9 @@ class ActionsMixin:
                 t["completed_at"] = ""
 
             after_due = t.get("due", "")
-            print(
-                f"[mark_done] id={t['id']} rep={rep} due: {before_due!r} -> {after_due!r} completed_at={t.get('completed_at')!r}"
+            logger.debug(
+                "mark_done id=%s rep=%s due: %r -> %r completed_at=%r",
+                t["id"], rep, before_due, after_due, t.get("completed_at"),
             )
 
         save_db(self.db)
@@ -55,7 +58,7 @@ class ActionsMixin:
 
     def soft_delete(self):
         ids = [t["id"] for t in self.selected_tasks()]
-        print("[delete] soft delete ids:", ids)
+        logger.debug("soft delete ids: %s", ids)
         ts = datetime.now().isoformat(timespec="seconds")
         for t in self.selected_tasks():
             t["is_deleted"] = True
@@ -65,7 +68,7 @@ class ActionsMixin:
 
     def restore(self):
         ids = [t["id"] for t in self.selected_tasks()]
-        print("[restore] ids:", ids)
+        logger.debug("restore ids: %s", ids)
         for t in self.selected_tasks():
             t["is_deleted"] = False
             t.pop("deleted_at", None)
@@ -99,7 +102,7 @@ class ActionsMixin:
         ids = [t["id"] for t in sels]
         if not messagebox.askyesno("Hard Delete", f"Permanently delete {len(ids)} task(s)? This cannot be undone."):
             return
-        print("[delete] HARD delete ids:", ids)
+        logger.debug("HARD delete ids: %s", ids)
         # remove from DB
         self.db["tasks"] = [t for t in self.db["tasks"] if t["id"] not in ids]
         save_db(self.db)
@@ -205,23 +208,10 @@ class ActionsMixin:
         )
         if s is None:
             return
-        parsed = parse_due_flexible(s.strip())
+        parsed = parse_due_entry(s.strip())
         if parsed is None:
-            ts = s.strip()
-            m_colon = re.match(r'^(\d{1,2}):(\d{2})$', ts)
-            m_plain = re.match(r'^(\d{3,4})$', ts)
-            if m_colon or m_plain:
-                if m_colon:
-                    hh, mm = int(m_colon.group(1)), int(m_colon.group(2))
-                else:
-                    raw = m_plain.group(1)
-                    if len(raw) == 3:
-                        raw = '0' + raw
-                    hh, mm = int(raw[:2]), int(raw[2:])
-                parsed = datetime.now().replace(hour=hh, minute=mm, second=0, microsecond=0)
-            else:
-                messagebox.showerror("Date error", "Invalid due format.")
-                return
+            messagebox.showerror("Date error", "Invalid due format.")
+            return
         val = fmt_due_for_store(parsed)
         changed = False
         for t in self.selected_tasks():

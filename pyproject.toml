@@ -1,9 +1,9 @@
 [project]
 name = "tasklistprogram"
 version = "0.1.0"
-description = ""
+description = "Tiny Tasklist — a lightweight, local-only task manager built with Python and Tkinter."
 authors = [
-    {name = "Your Name",email = "you@example.com"}
+    {name = "LacrimaeAware"}
 ]
 readme = "README.md"
 requires-python = ">=3.13"

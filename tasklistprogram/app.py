@@ -1,11 +1,14 @@
+import logging
+import sys
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk, messagebox, filedialog, simpledialog
-import re
 from typing import Optional, Tuple, List
 from datetime import datetime, date, timedelta
 
-from .core.dates import parse_due_flexible, fmt_due_for_store, parse_stored_due, next_due
+from .core.dates import parse_due_flexible, parse_due_entry, fmt_due_for_store
 from .core.model import load_db, save_db, get_task, delete_task, stats_summary, normalize_settings
+from .core import filters, scheduler
 from .ui.dialogs import (
     EditDialog,
     StatsDialog,
@@ -21,14 +24,14 @@ from .core.documents import (
     sync_task_notes,
     move_task_document_if_needed,
     open_document,
-    append_journal_task,
     append_journal_manual,
     ensure_journal_path,
     open_directory,
     get_mantras_file_path,
     read_task_notes_from_file,
     task_doc_path,
-    load_mantras_from_file,
+    pick_mantra_of_day,
+    pick_random_mantra,
     DATA_DIR,
 )
 
@@ -36,17 +39,28 @@ from .core.actions import ActionsMixin
 
 from .ui.listview import TaskListView
 from .ui.controls import AutoCompleteEntry
-from .core.constants import PRIORITY_ORDER, PRIO_ICON
+from .ui import theme
+from .core.constants import PRIO_ICON
+
+logger = logging.getLogger(__name__)
 
 class TaskApp(ActionsMixin, tk.Tk):
     REPEAT_OPTIONS = ["none", "daily", "weekdays", "weekly", "bi-weekly", "monthly", "custom"]
 
     def __init__(self):
         super().__init__()
-        self.title("Tiny Tasklist (Modular)")
+        self.title("Tiny Tasklist")
         self.geometry("1120x660")
+        self._set_app_icon()
         self.db = load_db()
-        
+
+        # Theming: remember the native ttk theme + default bg so light mode can
+        # restore them, then apply the saved theme at the end of __init__.
+        self.style = ttk.Style(self)
+        self._native_theme = self.style.theme_use()
+        self._default_bg = self.cget("bg")
+        self._theme_mode = "light"
+
         # Track last shown mantra to avoid consecutive duplicates
         self.last_shown_mantra = None
 
@@ -74,9 +88,14 @@ class TaskApp(ActionsMixin, tk.Tk):
         journal_menu.add_command(label="Open Today's Journal", command=self.open_today_journal)
         menubar.add_cascade(label="Journal", menu=journal_menu)
 
+        view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu.add_command(label="Toggle Dark Mode", command=self.toggle_theme)
+        menubar.add_cascade(label="View", menu=view_menu)
+
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="Help / Guide…", command=self.open_help)
         menubar.add_cascade(label="Help", menu=help_menu)
+        self.menubar = menubar
         self.config(menu=menubar)
 
         self.sort_state: Tuple[str, bool] = ("due", True)  # (column, ascending)
@@ -126,6 +145,8 @@ class TaskApp(ActionsMixin, tk.Tk):
         filt.pack(fill=tk.X)
         settings = normalize_settings(self.db.get("settings", {}))
         self.db["settings"] = settings
+
+        ttk.Button(filt, text="★ Today", command=self.show_today).pack(side=tk.LEFT, padx=(0, 10))
 
         ttk.Label(filt, text="Category:").pack(side=tk.LEFT)
         category_default = settings.get("ui_category_scope", "active")
@@ -203,8 +224,9 @@ class TaskApp(ActionsMixin, tk.Tk):
         ttk.Checkbutton(filt, text="Group view", variable=self.group_view, command=_apply_group_view) \
             .pack(side=tk.LEFT, padx=(16, 0))
 
-        # --- style: make the caret button flat and remove focus ring
-        style = ttk.Style(self)
+        # --- style: make the caret button flat and remove focus ring.
+        # (Table/selection styling is handled by theme.apply_theme.)
+        style = self.style
         style.configure("Caret.TButton", padding=(4, 1), relief="flat")
         style.map("Caret.TButton",
                   relief=[("pressed", "sunken"), ("!pressed", "flat")],
@@ -229,8 +251,18 @@ class TaskApp(ActionsMixin, tk.Tk):
         self.delete_btn.pack(side=tk.LEFT, padx=4)
         self.suspend_btn.pack(side=tk.LEFT, padx=4)
 
+        # Status bar (docked at the bottom; created before the list so it reserves space).
+        status = ttk.Frame(self, padding=(10, 3))
+        status.pack(side=tk.BOTTOM, fill=tk.X)
+        ttk.Separator(self, orient="horizontal").pack(side=tk.BOTTOM, fill=tk.X)
+        self.status_var = tk.StringVar(value="")
+        self.status_label = ttk.Label(status, textvariable=self.status_var, foreground="#555")
+        self.status_label.pack(side=tk.LEFT)
+
         # === Treeview moved to TaskListView ===
-        self.list = TaskListView(self, on_request_edit=self.edit_task, request_refresh=self.refresh)
+        initial_palette = theme.get_palette(self.db.get("settings", {}).get("ui_theme", "light"))
+        self.list = TaskListView(self, on_request_edit=self.edit_task,
+                                 request_refresh=self.refresh, palette=initial_palette)
 
         # Keep header sort behavior in app.py so sort state stays consistent
         def _header_sort(col):
@@ -272,9 +304,11 @@ class TaskApp(ActionsMixin, tk.Tk):
         self.list.tree.bind("<Button-3>", self.popup_menu)
         self.list.tree.bind("<<TreeviewSelect>>", lambda e: self._update_action_buttons())
 
+        # Apply the saved theme now that all widgets exist.
+        self._apply_theme(self.db.get("settings", {}).get("ui_theme", "light"))
+
         # Initial refresh & schedule resets
         self.refresh()
-        self.after(300, self.check_reminders)
         self.reset_repeating_tasks(catchup=True)
         self.schedule_midnight_reset()
         self.after(600, self._maybe_show_mantra_on_launch)
@@ -290,54 +324,10 @@ class TaskApp(ActionsMixin, tk.Tk):
         self.after(delay_ms, lambda: self.reset_repeating_tasks(catchup=False))
 
     def reset_repeating_tasks(self, catchup: bool):
-        """
-        Midnight-only reset: advance repeating tasks when the *next theoretical occurrence date*
-        is <= today (i.e. at midnight of the next occurrence). No user setting; always midnight behavior.
-        """
-        today = date.today()
-        changed = False
-
-        for t in self.db["tasks"]:
-            rep = t.get("repeat", "none")
-            if rep in ("", "none", None):
-                continue
-
-            stored = t.get("due", "")
-            due_dt = parse_stored_due(stored)
-            # If no stored due, assume today at midnight (safe default)
-            if not due_dt:
-                due_dt = datetime.combine(today, datetime.min.time())
-                stored = due_dt.strftime("%Y-%m-%d")
-
-            had_time = isinstance(stored, str) and len(stored) > 10
-            original_time = due_dt.time()
-
-            # Advance along the schedule while the *next* occurrence date is already <= today
-            while True:
-                next_day = next_due(due_dt.date(), rep)  # date of next theoretical occurrence
-                if next_day > today:
-                    break
-                # advance stored due to the next occurrence (preserve time/no-time)
-                if had_time:
-                    due_dt = datetime.combine(next_day, original_time)
-                else:
-                    due_dt = datetime.combine(next_day, datetime.min.time())
-                changed = True
-                self._apply_skip_escalation(t)
-                # loop to catch up multiple missed occurrences
-
-            # If task was completed previously and the (possibly-updated) due is today,
-            # clear completed_at so it reappears as active on its due day.
-            if t.get("completed_at") and due_dt.date() == today:
-                t["completed_at"] = ""
-                changed = True
-
-            # write back preserving the original had_time vs date-only
-            if had_time:
-                t["due"] = due_dt.strftime("%Y-%m-%d %H:%M")
-            else:
-                t["due"] = due_dt.strftime("%Y-%m-%d")
-
+        """Advance repeating tasks whose next occurrence is already due (midnight reset)."""
+        changed = scheduler.advance_repeating_tasks(
+            self.db, today=date.today(), hazard_enabled=self._hazard_enabled()
+        )
         if changed:
             save_db(self.db)
             self.refresh()
@@ -382,27 +372,8 @@ class TaskApp(ActionsMixin, tk.Tk):
             minvalue=1,
         )
 
-    def _priority_visible(self, p: str) -> bool:
-        s = self.db.get('settings', {})
-        minv = s.get('min_priority_visible', 'L')
-        minv_code = 'X' if isinstance(minv, str) and minv.lower() == 'misc' else (minv or 'L').upper()
-        return PRIORITY_ORDER.get((p or 'M').upper(), 0) >= PRIORITY_ORDER.get(minv_code, 2)
-
     def _hazard_enabled(self) -> bool:
         return bool(self.db.get("settings", {}).get("hazard_escalation_enabled", False))
-
-    def _apply_skip_escalation(self, task: dict) -> None:
-        if not self._hazard_enabled():
-            return
-        if (task.get("repeat") or "none").lower() in ("", "none"):
-            return
-        task["skip_count"] = int(task.get("skip_count", 0)) + 1
-        if task["skip_count"] >= 2 and "base_priority" not in task:
-            task["base_priority"] = task.get("priority", "M")
-        if task["skip_count"] >= 3:
-            task["priority"] = "U"
-        elif task["skip_count"] >= 2:
-            task["priority"] = "H"
 
     def reset_hazard_escalation(self):
         changed = False
@@ -418,6 +389,51 @@ class TaskApp(ActionsMixin, tk.Tk):
             save_db(self.db)
             self.refresh()
         messagebox.showinfo("Hazard Escalation", "Hazard escalation has been reset for all tasks.")
+
+    # ===== Window chrome =====
+    def _set_app_icon(self):
+        """Set the window/taskbar icon (best-effort; never fatal)."""
+        try:
+            icon_path = Path(__file__).resolve().parent / "ui" / "assets" / "icon.png"
+            if icon_path.exists():
+                self._icon_img = tk.PhotoImage(file=str(icon_path))
+                self.iconphoto(True, self._icon_img)
+        except Exception:
+            pass
+        if sys.platform.startswith("win"):
+            # Make Windows use the window icon in the taskbar instead of python's.
+            try:
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TinyTasklist.App")
+            except Exception:
+                pass
+
+    # ===== Theming =====
+    def _apply_theme(self, mode: str):
+        mode = mode if mode in ("light", "dark") else "light"
+        pal = theme.get_palette(mode)
+        theme.apply_theme(self, self.style, pal, self._native_theme)
+
+        # Root window + classic (non-ttk) widgets the theme can't reach via styles.
+        self.configure(bg=(pal["window_bg"] if mode == "dark" else self._default_bg))
+        if hasattr(self, "list"):
+            self.list.apply_palette(pal)
+        if hasattr(self, "status_label"):
+            self.status_label.configure(foreground=pal["status_fg"])
+        if hasattr(self, "notes_txt"):
+            self.notes_txt.configure(
+                background=pal["field_bg"] if mode == "dark" else "white",
+                foreground=pal["entry_fg"] if mode == "dark" else "black",
+                insertbackground=pal["entry_fg"] if mode == "dark" else "black",
+            )
+        self._theme_mode = mode
+
+    def toggle_theme(self):
+        new_mode = "light" if self._theme_mode == "dark" else "dark"
+        self.db.setdefault("settings", {})["ui_theme"] = new_mode
+        save_db(self.db)
+        self._apply_theme(new_mode)
+        self.refresh()
 
     def _display_title(self, task: dict) -> str:
         title = task.get("title", "")
@@ -548,22 +564,8 @@ class TaskApp(ActionsMixin, tk.Tk):
         title = self.title_var.get().strip()
         if not title: return
         due_s = self.due_var.get().strip()
-        
-        parsed = None
-        if due_s:
-            ts = due_s.strip()
-            m_colon = re.match(r'^(\d{1,2}):(\d{2})$', ts)
-            m_plain = re.match(r'^(\d{3,4})$', ts)
-            if m_colon or m_plain:
-                if m_colon:
-                    hh, mm = int(m_colon.group(1)), int(m_colon.group(2))
-                else:
-                    raw = m_plain.group(1)
-                    if len(raw) == 3: raw = '0' + raw
-                    hh, mm = int(raw[:2]), int(raw[2:])
-                parsed = datetime.now().replace(hour=hh, minute=mm, second=0, microsecond=0)
-            else:
-                parsed = parse_due_flexible(due_s)
+
+        parsed = parse_due_entry(due_s) if due_s else None
         if due_s and parsed is None:
             messagebox.showerror("Date error",
                 "Due must be 'YYYY-MM-DD [HH:MM]', 'MM/DD [HH:MM]', 'HH:MM', 'HHMM', or relative like '+2d +5h' (use 'midnight' for 23:59).")
@@ -649,106 +651,11 @@ class TaskApp(ActionsMixin, tk.Tk):
             self.refresh(select_id=t["id"])
         EditDialog(self, t, on_save)
 
-    def edit_task_for_iid(self, iid: str):
-        vals = self.tree.item(iid)["values"]
-        if not vals: return
-        try:
-            tid = int(vals[0])
-        except Exception:
-            return
-        t = get_task(self.db, tid)
-        if not t: return
-        def on_save(data):
-            t["title"] = data["title"]
-            t["due"] = data["due"]
-            t["priority"] = ("X" if str(data["priority"]).lower()=="misc" else data["priority"])
-            t["repeat"] = data["repeat"]
-            t["notes"] = data["notes"]
-            t["group"] = data.get("group","").strip()
-            t["updated_at"] = datetime.now().isoformat(timespec="seconds")
-            move_task_document_if_needed(t)
-            sync_task_notes(t)
-            save_db(self.db)
-            self.refresh(select_id=t["id"])
-        EditDialog(self, t, on_save)
-
-    def on_tree_double_click(self, event):
-        region = self.tree.identify_region(event.x, event.y)
-        if region not in ("cell", "tree"):
-            return
-        iid = self.tree.identify_row(event.y)
-        if not iid:
-            return
-        tags = self.tree.item(iid, "tags")
-        if "group_header" in tags:
-            vals = self.tree.item(iid)["values"]
-            # group name is stored in TITLE column (index 5)
-            if len(vals) >= 6:
-                gname = str(vals[5])
-                self.group_state[gname] = not self.group_state.get(gname, True)
-                self.refresh()
-            return
-        self.edit_task_for_iid(iid)
-
     # ===== Filter/Search/Sort/Refresh =====
     def passes_filter(self, t, category_scope: str, time_scope: str):
-        if not self._passes_category_filter(t, category_scope):
-            return False
-        if not self._priority_visible(t.get("priority", "M")):
-            return False
-        if not self._passes_time_filter(t, category_scope, time_scope):
-            return False
-        return True
-
-    def _passes_category_filter(self, t, category_scope: str) -> bool:
-        done = bool(t.get("completed_at"))
-        deleted = bool(t.get("is_deleted", False))
-        suspended = bool(t.get("is_suspended", False))
-        repeating = (t.get("repeat") or "").lower() not in ("", "none")
-
-        if category_scope == "deleted":
-            return deleted
-        if category_scope == "suspended":
-            return suspended and not deleted
-        if category_scope == "done":
-            return done and not deleted and not suspended
-
-        if deleted or suspended or done:
-            return False
-
-        if category_scope == "overdue":
-            d = parse_stored_due(t.get("due", "")) if t.get("due") else None
-            return bool(d and d < datetime.now())
-        if category_scope == "repeating":
-            return repeating
-        if category_scope in ("active", "all"):
-            return True
-        return True
-
-    def _passes_time_filter(self, t, category_scope: str, time_scope: str) -> bool:
-        # Archived/status views are category-first and ignore time slicing.
-        if category_scope in ("deleted", "suspended", "done"):
-            return True
-
-        d = parse_stored_due(t.get("due", "")) if t.get("due") else None
-        now = datetime.now()
-
-        if time_scope == "any":
-            return True
-        if time_scope == "today":
-            if not d:
-                return False
-            return d.date() == date.today() or d < now
-        if time_scope == "week":
-            return bool(d and d <= (now + timedelta(days=7)))
-        if time_scope == "month":
-            return bool(d and d <= (now + timedelta(days=30)))
-        if time_scope == "custom":
-            target = self._custom_filter_date()
-            if target is None:
-                return False
-            return bool(d and d.date() <= target)
-        return True
+        return filters.passes_filter(
+            t, self.db.get("settings", {}), category_scope, time_scope, self._custom_filter_date()
+        )
 
     def _custom_filter_date(self):
         if not self.custom_time_date:
@@ -795,28 +702,23 @@ class TaskApp(ActionsMixin, tk.Tk):
         self._sync_custom_date_button()
         self.refresh()
 
-    def search_match(self, t, q: str) -> bool:
-        if not q: return True
-        ql = q.lower()
-        return (ql in t.get("title","").lower()) or (ql in t.get("notes","").lower())
+    def show_today(self):
+        """Jump back to the daily focus view: active tasks due today/overdue."""
+        self.category_filter_var.set("active")
+        self.time_filter_var.set("today")
+        self.search_var.set("")
+        st = self.db.setdefault("settings", {})
+        st["ui_category_scope"] = "active"
+        st["ui_time_scope"] = "today"
+        save_db(self.db)
+        self._sync_custom_date_button()
+        self.refresh()
 
     def sort_by(self, col: str):
         current_col, ascending = self.sort_state
         ascending = not ascending if current_col == col else True
         self.sort_state = (col, ascending)
         self.refresh()
-
-    def sort_key_for(self, t, col: str):
-        if col == "id": return t["id"]
-        if col == "due":
-            d = parse_stored_due(t.get("due","")) if t.get("due") else datetime.max
-            return d
-        if col == "prio": return PRIORITY_ORDER.get(t.get("priority","M").upper(), 99)
-        if col == "rep": return t.get("repeat","")
-        if col == "title": return t.get("title","").lower()
-        if col == "notes": return t.get("notes","").lower()
-        if col == "times": return t.get("times_completed",0)
-        return 0
 
     def refresh(self, select_id: Optional[int] = None):
         category_scope = self.category_filter_var.get()
@@ -826,9 +728,9 @@ class TaskApp(ActionsMixin, tk.Tk):
 
         tasks = [
             t for t in self.db["tasks"]
-            if self.passes_filter(t, category_scope, time_scope) and self.search_match(t, query)
+            if self.passes_filter(t, category_scope, time_scope) and filters.search_match(t, query)
         ]
-        tasks.sort(key=lambda x: self.sort_key_for(x, col), reverse=not asc)
+        tasks.sort(key=lambda x: filters.sort_key_for(x, col), reverse=not asc)
         for t in tasks:
             t["_display_title"] = self._display_title(t)
 
@@ -856,7 +758,31 @@ class TaskApp(ActionsMixin, tk.Tk):
                     self.list.tree.selection_set(iid)
                     self.list.tree.see(iid)
                     break
+        self._apply_sort_indicators(category_scope)
+        self._update_status(len(tasks))
         self._update_action_buttons()
+
+    def _apply_sort_indicators(self, scope: str):
+        """Show ▲/▼ on the active sort column header so the current sort is visible."""
+        col, asc = self.sort_state
+        arrow = " ▲" if asc else " ▼"
+        for c in self.list.COLS:
+            base = "DELETED" if (c == "due" and scope == "deleted") else self.list.HEADERS[c]
+            self.list.tree.heading(c, text=base + (arrow if c == col else ""))
+
+    def _update_status(self, shown: int):
+        if not hasattr(self, "status_var"):
+            return
+        today = date.today()
+        open_count = sum(
+            1 for t in self.db["tasks"]
+            if not t.get("completed_at") and not t.get("is_deleted") and not t.get("is_suspended")
+        )
+        done_today = sum(
+            1 for t in self.db["tasks"]
+            if str(t.get("completed_at", ""))[:10] == today.isoformat()
+        )
+        self.status_var.set(f"Showing {shown}   ·   Open {open_count}   ·   Done today {done_today}")
 
     # ===== Stats / Settings / Reminders =====
     def open_help(self, initial_tab: str = "tutorial"):
@@ -865,7 +791,7 @@ class TaskApp(ActionsMixin, tk.Tk):
     def open_mantras(self):
         def _next():
             # Reload mantras from file each time
-            mantra = self._pick_random_mantra()
+            mantra = pick_random_mantra(self.last_shown_mantra)
             self.last_shown_mantra = mantra
             return mantra
 
@@ -882,38 +808,10 @@ class TaskApp(ActionsMixin, tk.Tk):
             return None
 
         # Load mantras from file and pick initial one
-        initial = self._pick_mantra_of_day()
+        initial = pick_mantra_of_day()
         self.last_shown_mantra = initial
-        # MantraDialog no longer needs mantras parameter - loads from file via callbacks
+        # MantraDialog loads from file via callbacks
         MantraDialog(self, on_add=_add, on_next=_next, initial=initial)
-
-    def _pick_mantra_of_day(self) -> str:
-        """Pick mantra based on day of year from file."""
-        mantras = load_mantras_from_file()
-        if not mantras:
-            return ""
-        idx = date.today().toordinal() % len(mantras)
-        return mantras[idx]
-
-    def _pick_random_mantra(self) -> str:
-        """Pick a random mantra from file, avoiding the last shown one if possible."""
-        mantras = load_mantras_from_file()
-        if not mantras:
-            return ""
-        
-        # If only one mantra, return it
-        if len(mantras) == 1:
-            return mantras[0]
-        
-        # Filter out the last shown mantra to avoid consecutive duplicates
-        available = [m for m in mantras if m != self.last_shown_mantra]
-        
-        # If all mantras were filtered out (shouldn't happen), use all mantras
-        if not available:
-            available = mantras
-        
-        import random
-        return random.choice(available)
 
     def _maybe_show_mantra_on_launch(self):
         settings = self.db.get("settings", {})
@@ -980,9 +878,7 @@ class TaskApp(ActionsMixin, tk.Tk):
                     "Import",
                     f"Imported {added} task(s). Skipped {failed} line(s).\n\nReasons:\n{detail_preview}{extra}"
                 )
-                print("[import] skipped lines detail:")
-                for d in details:
-                    print("[import]", d)
+                logger.debug("import skipped lines: %s", details)
             else:
                 messagebox.showinfo("Import", f"Imported {added} task(s).")
         except Exception as e:
@@ -1020,9 +916,6 @@ class TaskApp(ActionsMixin, tk.Tk):
     def _reminder_chip(self, t) -> str:
         from .core.reminders import reminder_chip
         return reminder_chip(t, self.db.get("settings", {}))
-
-    def check_reminders(self):
-        return
 
 def main():
     app = TaskApp()

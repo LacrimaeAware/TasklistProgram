@@ -30,8 +30,70 @@ DAYPART_MAP = {
     "evening": (20, 0),
 }
 
+# Relative day words -> offset from today (in days).
+RELDAY_MAP = {
+    "today": 0,
+    "tonight": 0,
+    "tomorrow": 1,
+    "tmrw": 1,
+    "tom": 1,
+    "yesterday": -1,
+}
+
+# Month names/abbreviations -> month number.
+MONTH_MAP = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
+
 def _end_of_day(dt: datetime) -> datetime:
     return dt.replace(hour=23, minute=59, second=0, microsecond=0)
+
+def _parse_time_token(tail: str):
+    """Parse 'HH:MM' or 'HHMM' -> (hh, mm), else None. Returns None on out-of-range."""
+    m = re.match(r'^(\d{1,2}):(\d{2})$', tail) or re.match(r'^(\d{3,4})$', tail)
+    if not m:
+        return None
+    if ":" in tail:
+        hh, mm = int(m.group(1)), int(m.group(2))
+    else:
+        raw = m.group(1)
+        if len(raw) == 3:
+            raw = "0" + raw
+        hh, mm = int(raw[:2]), int(raw[2:])
+    if hh > 23 or mm > 59:
+        return None
+    return hh, mm
+
+def _combine_with_tail(target_date: date, tail_tokens):
+    """Combine a resolved date with an optional trailing time/daypart/'midnight'.
+
+    Returns a datetime (timed), a ('dateonly', datetime) tuple (no time given),
+    or None when a tail was supplied but not understood.
+    """
+    base = datetime.combine(target_date, datetime.min.time())
+    if not tail_tokens:
+        return ("dateonly", base)
+    tail = " ".join(tail_tokens).strip().lower()
+    if tail == "midnight":
+        return base.replace(hour=23, minute=59)
+    if tail in DAYPART_MAP:
+        hh, mm = DAYPART_MAP[tail]
+        return base.replace(hour=hh, minute=mm)
+    hm = _parse_time_token(tail)
+    if hm is not None:
+        return base.replace(hour=hm[0], minute=hm[1])
+    return None
 
 def _has_time_tokens(tokens):
     for tok in tokens:
@@ -71,8 +133,16 @@ def parse_due_flexible(s: Optional[str]):
         hh, mm = DAYPART_MAP[s.lower()]
         return now.replace(hour=hh, minute=mm, second=0, microsecond=0)
 
-    # Weekday names with optional time or daypart
     tokens = s.split()
+
+    # Relative day words ('today', 'tomorrow', 'yesterday') with optional time/daypart
+    if tokens and tokens[0].lower() in RELDAY_MAP:
+        target_date = date.today() + timedelta(days=RELDAY_MAP[tokens[0].lower()])
+        res = _combine_with_tail(target_date, tokens[1:])
+        if res is not None:
+            return res
+
+    # Weekday names with optional time or daypart
     if tokens:
         day_key = tokens[0].lower()
         if day_key in WEEKDAY_MAP:
@@ -80,24 +150,27 @@ def parse_due_flexible(s: Optional[str]):
             target = WEEKDAY_MAP[day_key]
             days_ahead = (target - today.weekday()) % 7
             target_date = today + timedelta(days=days_ahead)
-            if len(tokens) == 1:
-                return ("dateonly", datetime.combine(target_date, datetime.min.time()))
-            tail = " ".join(tokens[1:]).strip().lower()
-            if tail == "midnight":
-                return datetime.combine(target_date, datetime.min.time()).replace(hour=23, minute=59)
-            if tail in DAYPART_MAP:
-                hh, mm = DAYPART_MAP[tail]
-                return datetime.combine(target_date, datetime.min.time()).replace(hour=hh, minute=mm)
-            m_time = re.match(r'^(\d{1,2}):(\d{2})$', tail) or re.match(r'^(\d{3,4})$', tail)
-            if m_time:
-                if ":" in tail:
-                    hh, mm = int(m_time.group(1)), int(m_time.group(2))
-                else:
-                    raw = m_time.group(1)
-                    if len(raw) == 3:
-                        raw = "0" + raw
-                    hh, mm = int(raw[:2]), int(raw[2:])
-                return datetime.combine(target_date, datetime.min.time()).replace(hour=hh, minute=mm)
+            res = _combine_with_tail(target_date, tokens[1:])
+            if res is not None:
+                return res
+
+    # Month-name dates ('Sept 29', 'September 29 2026', 'sep 29 14:00')
+    if len(tokens) >= 2:
+        month_key = re.sub(r'\.$', '', tokens[0].lower())
+        if month_key in MONTH_MAP and re.match(r'^\d{1,2}$', tokens[1]):
+            mon, day = MONTH_MAP[month_key], int(tokens[1])
+            rest = tokens[2:]
+            year = datetime.now().year
+            if rest and re.match(r'^\d{4}$', rest[0]):
+                year = int(rest[0])
+                rest = rest[1:]
+            try:
+                target_date = date(year, mon, day)
+            except ValueError:
+                return None
+            res = _combine_with_tail(target_date, rest)
+            if res is not None:
+                return res
 
     # Absolute YYYY-MM-DD with optional time or 'midnight'
     m = re.match(r'^(\d{4}-\d{2}-\d{2})(?:\s+(\d{2})(?::?(\d{2}))|\s+midnight)?$', s, re.IGNORECASE)
@@ -163,6 +236,25 @@ def parse_due_flexible(s: Optional[str]):
         d = result_dt.replace(hour=0, minute=0, second=0, microsecond=0)
         return ('dateonly', d)
 
+def parse_due_entry(s: Optional[str]):
+    """Canonical parser for user-typed due values.
+
+    Accepts a bare time ('HH:MM' or 'HHMM' -> today at that time) in addition to
+    everything ``parse_due_flexible`` handles. Use this for every text entry point
+    (Add box, Edit dialog, Set Due, import) so they all behave the same.
+
+    Returns None, a datetime, or a ('dateonly', datetime) tuple.
+    """
+    if not s or not s.strip():
+        return None
+    ts = s.strip()
+    if re.match(r'^(\d{1,2}):(\d{2})$', ts) or re.match(r'^(\d{3,4})$', ts):
+        hm = _parse_time_token(ts)
+        if hm is None:
+            return None
+        return datetime.now().replace(hour=hm[0], minute=hm[1], second=0, microsecond=0)
+    return parse_due_flexible(ts)
+
 def fmt_due_for_store(parsed):
     if parsed is None:
         return ""
@@ -224,11 +316,6 @@ def repeat_interval_days(repeat: Optional[str]) -> Optional[int]:
             return int(raw)
     return None
 
-def add_months_dateonly(d):
-    y = d.year
-    m = d.month + 1
-    y += (m - 1)//12
-    m = ((m - 1)%12) + 1
-    days = [31,29 if y%4==0 and (y%100!=0 or y%400==0) else 28,31,30,31,30,31,31,30,31,30,31][m-1]
-    day = min(d.day, days)
-    return date(y, m, day)
+# Kept as an alias for backwards-compatible imports; see month_add above.
+def add_months_dateonly(d: date) -> date:
+    return month_add(d)

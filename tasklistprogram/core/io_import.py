@@ -1,7 +1,6 @@
 # io_import.py
-import re
 from datetime import datetime
-from .dates import parse_due_flexible, fmt_due_for_store
+from .dates import parse_due_entry, fmt_due_for_store
 
 VALID_REPEATS = {"none", "daily", "weekdays", "weekly", "bi-weekly", "monthly"}
 VALID_PRIOS = {"H", "M", "L", "D", "X", "MISC", "Misc", "misc"}
@@ -60,26 +59,8 @@ def _parse_lines(lines, db, return_details: bool = False):
             error_details.append(f"Line {idx}: missing title.")
             continue
 
-        # parse due (supports HH:MM / HHMM shortcuts)
-        parsed = None
-        if due_s:
-            ts = due_s.strip()
-            m_colon = re.match(r'^(\d{1,2}):(\d{2})$', ts)
-            m_plain = re.match(r'^(\d{3,4})$', ts)
-            if m_colon or m_plain:
-                if m_colon:
-                    hh, mm = int(m_colon.group(1)), int(m_colon.group(2))
-                else:
-                    raw_hhmm = m_plain.group(1)
-                    if len(raw_hhmm) == 3:
-                        raw_hhmm = '0' + raw_hhmm
-                    hh, mm = int(raw_hhmm[:2]), int(raw_hhmm[2:])
-                if hh > 23 or mm > 59:
-                    parsed = None
-                else:
-                    parsed = datetime.now().replace(hour=hh, minute=mm, second=0, microsecond=0)
-            else:
-                parsed = parse_due_flexible(due_s)
+        # parse due (supports HH:MM / HHMM shortcuts via the shared entry parser)
+        parsed = parse_due_entry(due_s) if due_s else None
         if due_s and parsed is None:
             failed += 1
             error_details.append(

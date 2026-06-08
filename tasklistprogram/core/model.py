@@ -6,7 +6,10 @@ from typing import Optional, Dict, Any, List
 from .dates import parse_stored_due
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT_DIR / "data"
+# Data location can be overridden (e.g. a synced folder, or a separate DB for the
+# web server) via the TINYTASKLIST_DATA_DIR environment variable.
+_ENV_DATA_DIR = os.environ.get("TINYTASKLIST_DATA_DIR")
+DATA_DIR = Path(_ENV_DATA_DIR) if _ENV_DATA_DIR else (ROOT_DIR / "data")
 DATA_FILE = DATA_DIR / "tasks_gui.json"
 BACKUP_FILE = DATA_DIR / "tasks_gui.json.bak"
 LEGACY_DATA_FILE = ROOT_DIR / "tasks_gui.json"
@@ -36,6 +39,7 @@ def default_settings():
         "ui_category_scope": "active",
         "ui_time_scope": "today",
         "ui_time_custom_date": "",
+        "ui_theme": "light",
     }
 
 def normalize_settings(settings: dict) -> dict:

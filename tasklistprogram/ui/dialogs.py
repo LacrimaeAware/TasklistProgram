@@ -1,6 +1,6 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
-from ..core.dates import parse_due_flexible, fmt_due_for_store
+from tkinter import ttk, messagebox, simpledialog
+from ..core.dates import parse_due_entry, fmt_due_for_store
 
 def _place_window(window: tk.Toplevel, parent: tk.Misc | None = None) -> None:
     window.update_idletasks()
@@ -34,8 +34,10 @@ class EditDialog(tk.Toplevel):
         ttk.Entry(frm, textvariable=self.due_var, width=24).grid(row=1, column=1, sticky="w", padx=6, pady=4)
 
         ttk.Label(frm, text="Priority").grid(row=2, column=0, sticky="w")
-        self.prio_var = tk.StringVar(value=task.get("priority","M"))
-        prio_values = ["H", "M", "L", "D"]
+        # Show "Misc" for the stored "X" code so the user-facing label is consistent.
+        initial_prio = "Misc" if str(task.get("priority", "")).upper() == "X" else task.get("priority", "M")
+        self.prio_var = tk.StringVar(value=initial_prio)
+        prio_values = ["H", "M", "L", "D", "Misc"]
         if str(task.get("priority", "")).upper() == "U":
             prio_values = ["U"] + prio_values
         ttk.Combobox(frm, textvariable=self.prio_var, state="readonly", values=prio_values, width=6)\
@@ -75,11 +77,12 @@ class EditDialog(tk.Toplevel):
         due_s = self.due_var.get().strip()
         parsed = None
         if due_s:
-            parsed = parse_due_flexible(due_s)
+            parsed = parse_due_entry(due_s)
             if parsed is None:
                 messagebox.showerror("Error", "Invalid due format.")
                 return
-        prio = self.prio_var.get().upper()
+        prio_raw = self.prio_var.get()
+        prio = "X" if prio_raw.strip().lower() == "misc" else prio_raw.upper()
         if prio == "U" and str(self.task.get("priority", "")).upper() != "U":
             prio = "H"
         rep = self.rep_var.get()

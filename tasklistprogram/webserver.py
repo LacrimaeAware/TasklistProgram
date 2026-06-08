@@ -1,0 +1,213 @@
+"""Local web server: serves the `web/` prototype AND a small JSON API backed by the
+real task data, reusing the existing `core/` logic. Standard library only.
+
+Run:
+    python -m tasklistprogram.webserver         # http://localhost:8000
+    python -m tasklistprogram.webserver 8765    # custom port
+
+This is local-first: it binds to 127.0.0.1 by default and reads/writes the same
+`data/tasks_gui.json` the desktop app uses. It is NOT hardened for public exposure
+(no auth yet) — see docs/DESIGN.md for the planned auth/hosting phase.
+"""
+import json
+import sys
+import mimetypes
+from datetime import datetime, date
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlparse
+
+from .core import model
+from .core.dates import parse_due_entry, fmt_due_for_store, parse_stored_due, next_due
+
+ROOT = Path(__file__).resolve().parent.parent
+WEB_DIR = ROOT / "web"
+
+
+# ---------- task <-> client adapters ----------
+def to_client(t: dict) -> dict:
+    return {
+        "id": t["id"],
+        "title": t.get("title", ""),
+        "due": t.get("due", ""),
+        "priority": t.get("priority", "M"),
+        "repeat": t.get("repeat", "none"),
+        "group": t.get("group", ""),
+        "notes": t.get("notes", ""),
+        "done": bool(t.get("completed_at")),
+        "times": t.get("times_completed", 0),
+        "suspended": bool(t.get("is_suspended")),
+    }
+
+
+def visible_tasks(db: dict) -> list:
+    return [to_client(t) for t in db["tasks"] if not t.get("is_deleted")]
+
+
+# ---------- operations (mirror the desktop, minus Tk) ----------
+def op_mark_done(t: dict) -> None:
+    t["completed_at"] = datetime.now().isoformat(timespec="seconds")
+    t["times_completed"] = t.get("times_completed", 0) + 1
+    t.setdefault("history", []).append(date.today().isoformat())
+    t["skip_count"] = 0
+    if "base_priority" in t:
+        t["priority"] = t.get("base_priority", t.get("priority", "M"))
+        t.pop("base_priority", None)
+
+    rep = (t.get("repeat") or "none").lower()
+    if rep != "none":
+        cur = t.get("due", "")
+        due_dt = parse_stored_due(cur) or datetime.now()
+        had_time = isinstance(cur, str) and len(cur) > 10
+        nd = next_due(due_dt.date(), rep)
+        t["due"] = datetime.combine(nd, due_dt.time()).strftime("%Y-%m-%d %H:%M") if had_time else nd.strftime("%Y-%m-%d")
+        t["completed_at"] = ""  # recurring tasks reset for the next cycle
+
+
+def op_toggle(t: dict) -> None:
+    if t.get("completed_at"):
+        t["completed_at"] = ""  # undo a one-off completion
+    else:
+        op_mark_done(t)
+
+
+def op_add(db: dict, payload: dict) -> dict:
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise ValueError("title required")
+    due_s = (payload.get("due") or "").strip()
+    parsed = parse_due_entry(due_s) if due_s else None
+    prio = (payload.get("priority") or "M")
+    prio = "X" if str(prio).lower() == "misc" else str(prio).upper()
+    if prio not in ("U", "H", "M", "L", "D", "X"):
+        prio = "M"
+    rep = (payload.get("repeat") or "none")
+    if prio == "D":
+        rep = "daily"
+    t = {
+        "id": db["next_id"],
+        "title": title,
+        "notes": (payload.get("notes") or "").strip(),
+        "priority": prio,
+        "due": fmt_due_for_store(parsed) if due_s else "",
+        "repeat": rep,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "completed_at": "",
+        "times_completed": 0,
+        "history": [],
+        "is_deleted": False,
+        "is_suspended": False,
+        "skip_count": 0,
+        "group": (payload.get("group") or "").strip(),
+    }
+    db["tasks"].append(t)
+    db["next_id"] += 1
+    return t
+
+
+# ---------- HTTP handler ----------
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass  # quiet
+
+    # -- helpers --
+    def _send_json(self, obj, status=200):
+        body = json.dumps(obj).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_json(self):
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if not length:
+            return {}
+        try:
+            return json.loads(self.rfile.read(length).decode("utf-8"))
+        except Exception:
+            return {}
+
+    def _find(self, db, tid):
+        return next((t for t in db["tasks"] if t["id"] == tid), None)
+
+    # -- routing --
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path == "/api/tasks":
+            db = model.load_db()
+            return self._send_json({"tasks": visible_tasks(db), "settings": db.get("settings", {})})
+        if path == "/api/stats":
+            return self._send_json(model.stats_summary(model.load_db()))
+        return self._serve_static(path)
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        if path == "/api/tasks":
+            db = model.load_db()
+            try:
+                t = op_add(db, self._read_json())
+            except ValueError as e:
+                return self._send_json({"error": str(e)}, 400)
+            model.save_db(db)
+            return self._send_json(to_client(t), 201)
+        if path.startswith("/api/tasks/") and path.endswith("/toggle"):
+            return self._mutate_one(path.split("/")[3], op_toggle)
+        if path.startswith("/api/tasks/") and path.endswith("/done"):
+            return self._mutate_one(path.split("/")[3], op_mark_done)
+        return self._send_json({"error": "not found"}, 404)
+
+    def do_DELETE(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/tasks/"):
+            def _del(t):
+                t["is_deleted"] = True
+                t["deleted_at"] = datetime.now().isoformat(timespec="seconds")
+            return self._mutate_one(path.split("/")[3], _del)
+        return self._send_json({"error": "not found"}, 404)
+
+    def _mutate_one(self, raw_id, fn):
+        try:
+            tid = int(raw_id)
+        except ValueError:
+            return self._send_json({"error": "bad id"}, 400)
+        db = model.load_db()
+        t = self._find(db, tid)
+        if not t:
+            return self._send_json({"error": "not found"}, 404)
+        fn(t)
+        model.save_db(db)
+        return self._send_json(to_client(t))
+
+    def _serve_static(self, path):
+        if path in ("/", ""):
+            path = "/index.html"
+        target = (WEB_DIR / path.lstrip("/")).resolve()
+        # prevent path traversal outside web/
+        if not str(target).startswith(str(WEB_DIR.resolve())) or not target.is_file():
+            self.send_error(404)
+            return
+        ctype = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+        data = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def main():
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+    host = "127.0.0.1"
+    server = ThreadingHTTPServer((host, port), Handler)
+    print(f"Tiny Tasklist web server on http://{host}:{port}  (serving {WEB_DIR})")
+    print("Press Ctrl+C to stop.")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopping…")
+        server.shutdown()
+
+
+if __name__ == "__main__":
+    main()
