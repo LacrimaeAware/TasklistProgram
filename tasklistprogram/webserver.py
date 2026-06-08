@@ -35,8 +35,10 @@ def to_client(t: dict) -> dict:
         "group": t.get("group", ""),
         "notes": t.get("notes", ""),
         "done": bool(t.get("completed_at")),
+        "completed_at": t.get("completed_at", ""),
         "times": t.get("times_completed", 0),
         "suspended": bool(t.get("is_suspended")),
+        "history": t.get("history", []),
     }
 
 

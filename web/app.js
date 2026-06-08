@@ -186,13 +186,39 @@ function heatmapData(days) {
   return { cells, streak };
 }
 
+function isoDate(d) { const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function streakFromSet(set) {
+  const today = startOfToday();
+  let i = set.has(isoDate(today)) ? 0 : 1; // today may not be done yet
+  let s = 0;
+  for (; ; i++) { if (set.has(isoDate(addDays(today, -i)))) s++; else break; }
+  return s;
+}
+function habitInfo() {
+  // Use real completion history when available; otherwise the demo pattern.
+  const recurring = tasks.filter((t) => t.repeat && t.repeat !== "none" && Array.isArray(t.history) && t.history.length);
+  if (!recurring.length) { const d = heatmapData(91); return { title: "Take vitamins", cells: d.cells, streak: d.streak }; }
+  recurring.sort((a, b) => b.history.length - a.history.length);
+  const t = recurring[0];
+  const set = new Set(t.history.map((s) => String(s).slice(0, 10)));
+  const today = startOfToday(), cells = [];
+  for (let i = 90; i >= 0; i--) cells.push(set.has(isoDate(addDays(today, -i))) ? 3 : 0);
+  return { title: t.title, cells, streak: streakFromSet(set) };
+}
+function bestStreak() {
+  const withHist = tasks.filter((t) => Array.isArray(t.history) && t.history.length);
+  if (!withHist.length) return heatmapData(91).streak;
+  return Math.max(0, ...withHist.map((t) => streakFromSet(new Set(t.history.map((x) => String(x).slice(0, 10))))));
+}
+
 function renderHabits(content) {
-  const { cells, streak } = heatmapData(91);
+  const { title, cells, streak } = habitInfo();
   const card = document.createElement("div");
   card.className = "card";
   card.innerHTML = `
-    <h3>Take vitamins</h3>
-    <div class="muted">Daily habit · last 13 weeks</div>
+    <h3>${escapeHtml(title)}</h3>
+    <div class="muted">Top habit · last 13 weeks</div>
     <div style="display:flex;align-items:center;gap:28px;flex-wrap:wrap;margin-top:14px">
       <div><div class="streak-big">${streak} <span>day streak</span></div></div>
       <div class="heatmap">${cells.map((l) => `<div class="cell${l ? " l" + l : ""}"></div>`).join("")}</div>
@@ -209,14 +235,14 @@ function renderHabits(content) {
 /* ---------- stats ---------- */
 function renderStats(content) {
   const open = activeTasks().length;
-  const doneToday = tasks.filter((t) => t.done).length;
+  const todayIso = isoDate(startOfToday());
+  const doneToday = tasks.filter((t) => (t.completed_at ? String(t.completed_at).slice(0, 10) === todayIso : t.done)).length;
   const week = activeTasks().filter((t) => { const d = parseDue(t.due); return d && dayDiff(d) >= 0 && dayDiff(d) <= 7; }).length;
-  const { streak } = heatmapData(91);
   const cards = [
     { label: "Open", value: open },
     { label: "Done today", value: doneToday },
     { label: "Due this week", value: week },
-    { label: "Best streak", value: `${streak} <small>days</small>` },
+    { label: "Best streak", value: `${bestStreak()} <small>days</small>` },
   ];
   const wrap = document.createElement("div");
   wrap.className = "stats";
