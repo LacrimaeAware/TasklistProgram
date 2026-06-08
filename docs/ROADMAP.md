@@ -107,6 +107,24 @@ and web push (see [DESIGN.md](DESIGN.md)).
 > **Known caveat:** editing in the desktop and web at the same time can clobber
 > (last-writer-wins) — see ARCHITECTURE.md. The SQLite migration (below) is the fix.
 
+**Web parity (round 5) — driven by a 39-finding multi-agent audit**
+- **CRITICAL fixed:** concurrent web writes could lose data — the read-modify-write
+  cycle is now serialized with a lock (`webserver.py`).
+- **Collapsible group view** (▤ Group) in the main list — see multiple groups and
+  collapse the ones you don't need (the original point of groups), state remembered.
+- **Full filters** mirroring the desktop: a **Category** sidebar (Active / Overdue /
+  Repeating / Completed / Suspended / Deleted / All) × a **When** time filter ×
+  a **Min priority** filter × search.
+- **Deleted management:** Deleted view with **Restore** and **Delete permanently**
+  (new hard-delete endpoint); the API now returns all tasks so the client filters
+  like the desktop.
+- **Hazard escalation:** ⚠ shown on escalated tasks; **⚙ → Reset hazard escalation**
+  (new endpoint) mirrors the desktop.
+- Fixed the **"Done today" stat** to count recurring completions via history;
+  **Habits heatmap** now excludes suspended tasks.
+- Hardened: `_load_json` tolerates a UTF-8 BOM (regression test); added op_update /
+  op_reset_hazard / client_tasks tests (110 total).
+
 ## Next up (prioritized)
 
 1. **SQLite single source of truth** (DESIGN.md Phase 1). Move persistence behind
@@ -123,6 +141,10 @@ and web push (see [DESIGN.md](DESIGN.md)).
 4. **Clearer recurring instances.** A task that recurs as just "meal" reads
    ambiguously; consider per-occurrence labels (Breakfast/Lunch/Dinner) or a
    title pattern so the day's instance is self-explanatory.
+5. **Remaining web polish (from the audit):** custom date-range filter; multi-select
+   bulk actions; click-header column sort; accessibility (ARIA/semantic HTML);
+   reduce per-row chip clutter; an aggregated "N overdue" banner on Today when data
+   is stale; Ultra/priority icon shown in the editor.
 
 ## Open items (intentionally not changed — behavior decisions)
 

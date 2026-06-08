@@ -19,8 +19,17 @@ the "professional, website-style" direction discussed in
   with Edit / Mark done / Suspend / Delete.
 - **Complete:** click the circle. A toast appears with **Undo** (works even for
   recurring tasks, which advance their date when completed).
-- **Suspended** tasks are hidden from the active views and live under the Suspended
-  view — matching the desktop app.
+
+## Filtering & grouping (matches the desktop)
+- **Category** (left sidebar): Active / Overdue / Repeating / Completed / Suspended /
+  Deleted / All. Repeating shows the streak heatmap; Deleted lets you Restore or
+  Delete-permanently (right-click).
+- **When / Min priority** (filter bar): time window and a minimum-priority filter.
+- **▤ Group:** collapsible group headers in the main list — see multiple groups at
+  once and collapse the ones you don't need (state remembered). Use **Collapse all**
+  to fold everything. (Clicking a group in the sidebar focuses just that one.)
+- **⚙ → Reset hazard escalation** clears all escalation, like the desktop.
+- All filter/group choices persist between visits (localStorage).
 
 ## Two ways to run it
 

@@ -1,23 +1,55 @@
-/* Tiny Tasklist — web prototype logic (vanilla JS, no dependencies). */
+/* Tiny Tasklist — web app logic (vanilla JS, no dependencies).
+   Mirrors the desktop's filtering model: Category × Time × Min-priority × Search,
+   plus a collapsible Group view. */
 
 const MS_DAY = 86400000;
 const PRIO = {
-  U: { label: "Ultra", icon: "🚨" },
-  H: { label: "High", icon: "🔴" },
-  M: { label: "Med", icon: "🟠" },
-  L: { label: "Low", icon: "🟡" },
-  D: { label: "Daily", icon: "🟢" },
-  X: { label: "Misc", icon: "🔵" },
+  U: { label: "Ultra", icon: "🚨" }, H: { label: "High", icon: "🔴" },
+  M: { label: "Med", icon: "🟠" }, L: { label: "Low", icon: "🟡" },
+  D: { label: "Daily", icon: "🟢" }, X: { label: "Misc", icon: "🔵" },
 };
 const PRIO_RANK = { U: 5, H: 4, M: 3, L: 2, D: 1, X: 0 };
+function rankOf(code) { return PRIO_RANK[(code === "Misc" ? "X" : (code || "M")).toUpperCase ? (code || "M").toUpperCase() : code] ?? 0; }
+
+const CATEGORIES = [
+  { id: "active", icon: "●", label: "Active" },
+  { id: "overdue", icon: "⚠", label: "Overdue" },
+  { id: "repeating", icon: "🔁", label: "Repeating" },
+  { id: "done", icon: "✓", label: "Completed" },
+  { id: "suspended", icon: "⏸", label: "Suspended" },
+  { id: "deleted", icon: "🗑", label: "Deleted" },
+  { id: "all", icon: "📋", label: "All" },
+];
 
 let tasks = SAMPLE_TASKS.slice();
-let state = { view: "today", group: null, search: "" };
 let nextId = Math.max(...tasks.map((t) => t.id)) + 1;
-let LIVE = false;          // connected to the local API (webserver.py)
-let editingId = null;      // task id being edited in the modal, or null for add
-let _ctxMenu = null;
+let LIVE = false;
+let editingId = null;
+let _menu = null;
 let _toastTimer = null;
+let state = loadState();
+
+function loadState() {
+  let s = {};
+  try { s = JSON.parse(localStorage.getItem("tt_state") || "{}"); } catch (e) {}
+  return {
+    category: s.category || "active",
+    time: s.time || "today",
+    minPrio: s.minPrio || "all",
+    grouped: !!s.grouped,
+    collapsed: new Set(s.collapsed || []),
+    group: null,    // sidebar group focus (transient)
+    search: "",
+  };
+}
+function saveState() {
+  try {
+    localStorage.setItem("tt_state", JSON.stringify({
+      category: state.category, time: state.time, minPrio: state.minPrio,
+      grouped: state.grouped, collapsed: [...state.collapsed],
+    }));
+  } catch (e) {}
+}
 
 /* ---------- API ---------- */
 async function api(method, url, body) {
@@ -28,25 +60,15 @@ async function api(method, url, body) {
   return r.json();
 }
 async function loadData() {
-  try {
-    const d = await api("GET", "/api/tasks");
-    tasks = d.tasks;
-    LIVE = true;
-  } catch (e) {
-    tasks = SAMPLE_TASKS.slice();
-    LIVE = false;
-  }
+  try { tasks = (await api("GET", "/api/tasks")).tasks; LIVE = true; }
+  catch (e) { tasks = SAMPLE_TASKS.slice(); LIVE = false; }
 }
 
 /* ---------- date helpers ---------- */
 function startOfToday() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
 function isoDate(d) { const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
-function parseDue(s) {
-  if (!s) return null;
-  const [y, m, d] = s.slice(0, 10).split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
+function parseDue(s) { if (!s) return null; const [y, m, d] = s.slice(0, 10).split("-").map(Number); return new Date(y, m - 1, d); }
 function dayDiff(due) { return Math.round((due - startOfToday()) / MS_DAY); }
 function dueChip(due) {
   if (!due) return null;
@@ -58,81 +80,74 @@ function dueChip(due) {
   return { text: due.toLocaleDateString(undefined, { month: "short", day: "numeric" }) };
 }
 
-/* ---------- filtering (suspended-aware, mirrors the desktop) ---------- */
-function activeTasks() { return tasks.filter((t) => !t.done && !t.suspended); }
-
-function viewTasks() {
-  let list;
-  if (state.view === "done") {
-    list = tasks.filter((t) => t.done && !t.suspended);
-  } else if (state.view === "suspended") {
-    list = tasks.filter((t) => t.suspended && !t.done);
-  } else if (state.view === "habits") {
-    list = tasks.filter((t) => t.repeat && t.repeat !== "none" && !t.suspended);
-  } else if (state.view === "upcoming") {
-    list = activeTasks().filter((t) => { const d = parseDue(t.due); return d && dayDiff(d) > 0; });
-  } else if (state.view === "today") {
-    list = activeTasks().filter((t) => { const d = parseDue(t.due); return d && dayDiff(d) <= 0; });
-  } else {
-    list = activeTasks(); // "all"
-  }
+/* ---------- filtering (mirrors core/filters.py) ---------- */
+function categoryPass(t, cat) {
+  const done = !!t.done, deleted = !!t.is_deleted, suspended = !!t.suspended;
+  const repeating = t.repeat && t.repeat !== "none";
+  if (cat === "deleted") return deleted;
+  if (cat === "suspended") return suspended && !deleted;
+  if (cat === "done") return done && !deleted && !suspended;
+  if (deleted || suspended || done) return false;
+  if (cat === "overdue") { const d = parseDue(t.due); return !!(d && d < new Date()); }
+  if (cat === "repeating") return repeating;
+  return true; // active / all
+}
+function timePass(t, cat, time) {
+  if (cat === "deleted" || cat === "suspended" || cat === "done") return true;
+  const d = parseDue(t.due), now = new Date();
+  if (time === "any") return true;
+  if (time === "today") return !!(d && dayDiff(d) <= 0);
+  if (time === "week") return !!(d && d <= addDays(startOfToday(), 7));
+  if (time === "month") return !!(d && d <= addDays(startOfToday(), 30));
+  return true;
+}
+function minPrioPass(t) {
+  if (state.minPrio === "all") return true;
+  return rankOf(t.priority) >= rankOf(state.minPrio);
+}
+function searchPass(t) {
+  if (!state.search) return true;
+  const q = state.search.toLowerCase();
+  return t.title.toLowerCase().includes(q) || (t.notes || "").toLowerCase().includes(q);
+}
+function filtered() {
+  let list = tasks.filter((t) =>
+    categoryPass(t, state.category) && timePass(t, state.category, state.time) && minPrioPass(t) && searchPass(t));
   if (state.group) list = list.filter((t) => (t.group || "Ungrouped") === state.group);
-  if (state.search) {
-    const q = state.search.toLowerCase();
-    list = list.filter((t) => t.title.toLowerCase().includes(q) || (t.notes || "").toLowerCase().includes(q));
-  }
   return list;
 }
-
 function sortTasks(list) {
   return list.slice().sort((a, b) => {
     const da = parseDue(a.due), db = parseDue(b.due);
     const ta = da ? da.getTime() : Infinity, tb = db ? db.getTime() : Infinity;
     if (ta !== tb) return ta - tb;
-    return (PRIO_RANK[b.priority] || 0) - (PRIO_RANK[a.priority] || 0);
+    return rankOf(b.priority) - rankOf(a.priority);
   });
 }
 
 /* ---------- sidebar ---------- */
-const VIEWS = [
-  { id: "today", icon: "★", label: "Today" },
-  { id: "upcoming", icon: "📅", label: "Upcoming" },
-  { id: "habits", icon: "🔁", label: "Habits" },
-  { id: "all", icon: "📋", label: "All tasks" },
-  { id: "done", icon: "✓", label: "Completed" },
-  { id: "suspended", icon: "⏸", label: "Suspended" },
-];
-
-function viewCount(id) {
-  if (id === "today") return activeTasks().filter((t) => { const d = parseDue(t.due); return d && dayDiff(d) <= 0; }).length;
-  if (id === "upcoming") return activeTasks().filter((t) => { const d = parseDue(t.due); return d && dayDiff(d) > 0; }).length;
-  if (id === "habits") return tasks.filter((t) => t.repeat && t.repeat !== "none" && !t.suspended).length;
-  if (id === "all") return activeTasks().length;
-  if (id === "done") return tasks.filter((t) => t.done && !t.suspended).length;
-  if (id === "suspended") return tasks.filter((t) => t.suspended && !t.done).length;
-  return 0;
-}
+function categoryCount(id) { return tasks.filter((t) => categoryPass(t, id)).length; }
 
 function renderSidebar() {
   const v = document.getElementById("views");
   v.innerHTML = "";
-  VIEWS.forEach((view) => {
+  CATEGORIES.forEach((c) => {
     const el = document.createElement("div");
-    el.className = "nav-item" + (state.view === view.id && !state.group ? " active" : "");
-    el.innerHTML = `<span class="ico">${view.icon}</span><span class="label">${view.label}</span><span class="count">${viewCount(view.id)}</span>`;
-    el.onclick = () => { state.view = view.id; state.group = null; render(); closeSidebar(); };
+    el.className = "nav-item" + (state.category === c.id && !state.group ? " active" : "");
+    el.innerHTML = `<span class="ico">${c.icon}</span><span class="label">${c.label}</span><span class="count">${categoryCount(c.id)}</span>`;
+    el.onclick = () => { state.category = c.id; state.group = null; saveState(); render(); closeSidebar(); };
     v.appendChild(el);
   });
 
   const groups = {};
-  activeTasks().forEach((t) => { const g = t.group || "Ungrouped"; groups[g] = (groups[g] || 0) + 1; });
+  tasks.filter((t) => categoryPass(t, "active")).forEach((t) => { const g = t.group || "Ungrouped"; groups[g] = (groups[g] || 0) + 1; });
   const g = document.getElementById("groups");
   g.innerHTML = "";
   Object.keys(groups).sort().forEach((name) => {
     const el = document.createElement("div");
     el.className = "nav-item" + (state.group === name ? " active" : "");
     el.innerHTML = `<span class="ico">#</span><span class="label">${escapeHtml(name)}</span><span class="count">${groups[name]}</span>`;
-    el.onclick = () => { state.group = name; state.view = "all"; render(); closeSidebar(); };
+    el.onclick = () => { state.group = state.group === name ? null : name; saveState(); render(); closeSidebar(); };
     g.appendChild(el);
   });
 }
@@ -142,6 +157,7 @@ function taskRow(t) {
   const due = parseDue(t.due);
   const chip = dueChip(due);
   const p = PRIO[t.priority] || PRIO.M;
+  const warn = (t.skip_count > 0) ? "⚠ " : "";
   const el = document.createElement("div");
   el.className = "task" + (t.done ? " done" : "") + (t.suspended ? " suspended" : "");
   el.style.setProperty("--bar", `var(--p-${t.priority})`);
@@ -155,7 +171,7 @@ function taskRow(t) {
   el.innerHTML = `
     <div class="check" title="Toggle done">${t.done ? "✓" : ""}</div>
     <div class="body">
-      <div class="title">${escapeHtml(t.title)}</div>
+      <div class="title">${warn}${escapeHtml(t.title)}</div>
       ${t.notes ? `<div class="notes">${escapeHtml(t.notes)}</div>` : ""}
       <div class="meta">${meta.join("")}</div>
     </div>
@@ -163,45 +179,55 @@ function taskRow(t) {
     <span class="prio-tag" style="background: var(--p-${t.priority})">${p.icon} ${p.label}</span>
   `;
   el.querySelector(".check").onclick = (e) => { e.stopPropagation(); toggleDone(t); };
-  el.querySelector(".body").onclick = () => openModal(t);          // click to edit
-  el.querySelector(".row-menu").onclick = (e) => { e.stopPropagation(); const r = e.target.getBoundingClientRect(); showContextMenu(r.left, r.bottom + 4, t); };
-  el.oncontextmenu = (e) => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, t); };  // right-click, like the desktop
+  el.querySelector(".body").onclick = () => openModal(t);
+  el.querySelector(".row-menu").onclick = (e) => { e.stopPropagation(); const r = e.target.getBoundingClientRect(); popupMenu(r.left, r.bottom + 4, rowMenuItems(t)); };
+  el.oncontextmenu = (e) => { e.preventDefault(); popupMenu(e.clientX, e.clientY, rowMenuItems(t)); };
   return el;
 }
 
-/* ---------- context menu (right-click / ⋯) ---------- */
-function showContextMenu(x, y, t) {
-  closeContextMenu();
+function rowMenuItems(t) {
+  if (t.is_deleted) {
+    return [
+      { label: "↩  Restore", fn: () => restoreTask(t) },
+      { sep: true },
+      { label: "🗑  Delete permanently", cls: "danger", fn: () => hardDelete(t) },
+    ];
+  }
+  return [
+    { label: "✎  Edit", fn: () => openModal(t) },
+    { label: t.done ? "↩  Mark not done" : "✓  Mark done", fn: () => toggleDone(t) },
+    { label: t.suspended ? "▶  Unsuspend" : "⏸  Suspend", fn: () => setSuspended(t, !t.suspended) },
+    { sep: true },
+    { label: "🗑  Delete", cls: "danger", fn: () => deleteTask(t) },
+  ];
+}
+
+/* ---------- popup menu (right-click / ⋯ / gear) ---------- */
+function popupMenu(x, y, items) {
+  closeMenu();
   const m = document.createElement("div");
   m.className = "context-menu";
-  const add = (label, fn, cls) => {
-    const it = document.createElement("div");
-    it.className = "item" + (cls ? " " + cls : "");
-    it.textContent = label;
-    it.onclick = () => { closeContextMenu(); fn(); };
-    m.appendChild(it);
-  };
-  const sep = () => { const s = document.createElement("div"); s.className = "sep"; m.appendChild(s); };
-  add("✎  Edit", () => openModal(t));
-  add(t.done ? "↩  Mark not done" : "✓  Mark done", () => toggleDone(t));
-  add(t.suspended ? "▶  Unsuspend" : "⏸  Suspend", () => setSuspended(t, !t.suspended));
-  sep();
-  add("🗑  Delete", () => deleteTask(t), "danger");
+  items.forEach((it) => {
+    if (it.sep) { const s = document.createElement("div"); s.className = "sep"; m.appendChild(s); return; }
+    const el = document.createElement("div");
+    el.className = "item" + (it.cls ? " " + it.cls : "");
+    el.textContent = it.label;
+    el.onclick = () => { closeMenu(); it.fn(); };
+    m.appendChild(el);
+  });
   document.body.appendChild(m);
   const r = m.getBoundingClientRect();
   m.style.left = Math.min(x, window.innerWidth - r.width - 8) + "px";
   m.style.top = Math.min(y, window.innerHeight - r.height - 8) + "px";
-  _ctxMenu = m;
+  _menu = m;
 }
-function closeContextMenu() { if (_ctxMenu) { _ctxMenu.remove(); _ctxMenu = null; } }
+function closeMenu() { if (_menu) { _menu.remove(); _menu = null; } }
 
 /* ---------- mutations ---------- */
 async function toggleDone(t) {
   const snap = { ...t };
-  if (LIVE) {
-    try { Object.assign(t, await api("POST", `/api/tasks/${t.id}/toggle`)); }
-    catch (e) { t.done = !t.done; }
-  } else { t.done = !t.done; }
+  if (LIVE) { try { Object.assign(t, await api("POST", `/api/tasks/${t.id}/toggle`)); } catch (e) { t.done = !t.done; } }
+  else { t.done = !t.done; }
   render();
   showToast(snap.done ? "Marked not done" : "Marked done", "Undo", () => undoToggle(snap));
 }
@@ -209,57 +235,61 @@ async function undoToggle(snap) {
   if (LIVE) {
     try {
       await api("PATCH", `/api/tasks/${snap.id}`, {
-        due: snap.due, completed_at: snap.completed_at || "", times: snap.times, history: snap.history || [],
-        is_suspended: !!snap.suspended,
+        due: snap.due, completed_at: snap.completed_at || "", times: snap.times,
+        history: snap.history || [], is_suspended: !!snap.suspended,
       });
       await loadData();
     } catch (e) {}
-  } else {
-    const t = tasks.find((x) => x.id === snap.id);
-    if (t) Object.assign(t, snap);
-  }
+  } else { const t = tasks.find((x) => x.id === snap.id); if (t) Object.assign(t, snap); }
   render();
 }
 async function setSuspended(t, val) {
-  if (LIVE) {
-    try { Object.assign(t, await api("PATCH", `/api/tasks/${t.id}`, { is_suspended: val })); } catch (e) {}
-  } else { t.suspended = val; }
+  if (LIVE) { try { Object.assign(t, await api("PATCH", `/api/tasks/${t.id}`, { is_suspended: val })); } catch (e) {} }
+  else { t.suspended = val; }
   render();
   showToast(val ? "Suspended" : "Unsuspended", "Undo", () => setSuspended(t, !val));
 }
 async function deleteTask(t) {
   const snap = { ...t };
-  if (LIVE) { try { await api("DELETE", `/api/tasks/${t.id}`); } catch (e) {} }
+  if (LIVE) { try { await api("DELETE", `/api/tasks/${t.id}`); t.is_deleted = true; } catch (e) {} }
+  else { t.is_deleted = true; }
+  render();
+  showToast("Deleted", "Undo", () => restoreTask(snap));
+}
+async function restoreTask(t) {
+  if (LIVE) { try { Object.assign(t, await api("PATCH", `/api/tasks/${t.id}`, { is_deleted: false })); } catch (e) {} }
+  const local = tasks.find((x) => x.id === t.id); if (local) local.is_deleted = false;
+  render();
+}
+async function hardDelete(t) {
+  if (!window.confirm(`Permanently delete "${t.title}"? This cannot be undone.`)) return;
+  if (LIVE) { try { await api("POST", `/api/tasks/${t.id}/harddelete`); } catch (e) {} }
   tasks = tasks.filter((x) => x.id !== t.id);
   render();
-  showToast("Deleted", "Undo", async () => {
-    if (LIVE) { try { await api("PATCH", `/api/tasks/${snap.id}`, { is_deleted: false }); await loadData(); } catch (e) {} }
-    else { tasks.push(snap); }
-    render();
-  });
+  showToast("Permanently deleted");
+}
+async function resetHazard() {
+  if (LIVE) { try { await api("POST", "/api/hazard/reset"); await loadData(); } catch (e) {} }
+  else { tasks.forEach((t) => { t.skip_count = 0; }); }
+  render();
+  showToast("Hazard escalation reset");
 }
 
 /* ---------- habit heatmap ---------- */
 function heatmapData(days) {
-  const cells = [];
-  let seed = 7;
+  const cells = []; let seed = 7;
   const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
-  for (let i = days - 1; i >= 0; i--) {
-    cells.push(i < 5 ? 3 : (rand() < 0.74 ? (1 + Math.floor(rand() * 3)) : 0));
-  }
-  let streak = 0;
-  for (let i = cells.length - 1; i >= 0 && cells[i] > 0; i--) streak++;
+  for (let i = days - 1; i >= 0; i--) cells.push(i < 5 ? 3 : (rand() < 0.74 ? (1 + Math.floor(rand() * 3)) : 0));
+  let streak = 0; for (let i = cells.length - 1; i >= 0 && cells[i] > 0; i--) streak++;
   return { cells, streak };
 }
 function streakFromSet(set) {
-  const today = startOfToday();
-  let i = set.has(isoDate(today)) ? 0 : 1;
-  let s = 0;
+  const today = startOfToday(); let i = set.has(isoDate(today)) ? 0 : 1, s = 0;
   for (; ; i++) { if (set.has(isoDate(addDays(today, -i)))) s++; else break; }
   return s;
 }
 function habitInfo() {
-  const recurring = tasks.filter((t) => t.repeat && t.repeat !== "none" && Array.isArray(t.history) && t.history.length);
+  const recurring = tasks.filter((t) => t.repeat && t.repeat !== "none" && !t.suspended && !t.is_deleted && Array.isArray(t.history) && t.history.length);
   if (!recurring.length) { const d = heatmapData(91); return { title: "Take vitamins", cells: d.cells, streak: d.streak }; }
   recurring.sort((a, b) => b.history.length - a.history.length);
   const t = recurring[0];
@@ -269,12 +299,11 @@ function habitInfo() {
   return { title: t.title, cells, streak: streakFromSet(set) };
 }
 function bestStreak() {
-  const withHist = tasks.filter((t) => Array.isArray(t.history) && t.history.length);
-  if (!withHist.length) return heatmapData(91).streak;
-  return Math.max(0, ...withHist.map((t) => streakFromSet(new Set(t.history.map((x) => String(x).slice(0, 10))))));
+  const wh = tasks.filter((t) => Array.isArray(t.history) && t.history.length);
+  if (!wh.length) return heatmapData(91).streak;
+  return Math.max(0, ...wh.map((t) => streakFromSet(new Set(t.history.map((x) => String(x).slice(0, 10))))));
 }
-
-function renderHabits(content) {
+function renderHeatmap(content) {
   const { title, cells, streak } = habitInfo();
   const card = document.createElement("div");
   card.className = "card";
@@ -286,20 +315,19 @@ function renderHabits(content) {
       <div class="heatmap">${cells.map((l) => `<div class="cell${l ? " l" + l : ""}"></div>`).join("")}</div>
     </div>`;
   content.appendChild(card);
-
-  const heading = document.createElement("div");
-  heading.className = "section-title";
-  heading.textContent = "All recurring tasks";
-  content.appendChild(heading);
-  sortTasks(viewTasks()).forEach((t) => content.appendChild(taskRow(t)));
 }
 
 /* ---------- stats ---------- */
+function isDoneToday(t) {
+  const today = isoDate(startOfToday());
+  if (t.completed_at) return String(t.completed_at).slice(0, 10) === today;
+  if (Array.isArray(t.history) && t.history.length) return t.history.some((h) => String(h).slice(0, 10) === today);
+  return !!t.done;
+}
 function renderStats(content) {
-  const open = activeTasks().length;
-  const todayIso = isoDate(startOfToday());
-  const doneToday = tasks.filter((t) => (t.completed_at ? String(t.completed_at).slice(0, 10) === todayIso : t.done)).length;
-  const week = activeTasks().filter((t) => { const d = parseDue(t.due); return d && dayDiff(d) >= 0 && dayDiff(d) <= 7; }).length;
+  const open = tasks.filter((t) => categoryPass(t, "active")).length;
+  const doneToday = tasks.filter((t) => !t.is_deleted && isDoneToday(t)).length;
+  const week = tasks.filter((t) => categoryPass(t, "active") && timePassRaw(t, "week")).length;
   const cards = [
     { label: "Open", value: open },
     { label: "Done today", value: doneToday },
@@ -311,42 +339,69 @@ function renderStats(content) {
   wrap.innerHTML = cards.map((c) => `<div class="stat"><div class="label">${c.label}</div><div class="value">${c.value}</div></div>`).join("");
   content.appendChild(wrap);
 }
+function timePassRaw(t, time) { const d = parseDue(t.due); return !!(d && dayDiff(d) >= 0 && d <= addDays(startOfToday(), time === "week" ? 7 : 30)); }
 
 /* ---------- main render ---------- */
 function render() {
   renderSidebar();
-  const titleMap = { today: "Today", upcoming: "Upcoming", habits: "Habits", all: "All tasks", done: "Completed", suspended: "Suspended" };
-  document.getElementById("viewTitle").textContent = state.group || titleMap[state.view];
-  const niceDate = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
-  document.getElementById("viewSub").textContent = state.view === "today" && !state.group ? niceDate : "";
+  syncFilterBar();
+  const catLabel = (CATEGORIES.find((c) => c.id === state.category) || {}).label || "Tasks";
+  document.getElementById("viewTitle").textContent = state.group || catLabel;
+  const showToday = state.category === "active" && state.time === "today" && !state.group;
+  document.getElementById("viewSub").textContent = showToday ? new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) : "";
 
   const content = document.getElementById("content");
   content.innerHTML = "";
 
-  if (state.view === "today" && !state.group) {
+  if (showToday) {
     const banner = LIVE
-      ? `<div class="banner">🟢 Connected to your local data (via the Tiny Tasklist web server).</div>`
-      : `<div class="banner">✨ Static prototype with sample data — run <code>python -m tasklistprogram.webserver</code> to connect your real tasks.</div>`;
+      ? `<div class="banner">🟢 Connected to your local data.</div>`
+      : `<div class="banner">✨ Static prototype with sample data — run the local server to connect your real tasks.</div>`;
     content.insertAdjacentHTML("beforeend", banner);
     renderStats(content);
   }
+  if (state.category === "repeating" && !state.group) renderHeatmap(content);
 
-  if (state.view === "habits" && !state.group) { renderHabits(content); return; }
-
-  // Completed view: most-recently-completed first.
-  let list;
-  if (state.view === "done") {
-    list = viewTasks().sort((a, b) => String(b.completed_at || "").localeCompare(String(a.completed_at || "")));
-  } else {
-    list = sortTasks(viewTasks());
-  }
+  let list = filtered();
+  list = (state.category === "done")
+    ? list.sort((a, b) => String(b.completed_at || "").localeCompare(String(a.completed_at || "")))
+    : sortTasks(list);
 
   if (!list.length) {
-    const msg = state.view === "today" ? "Nothing due today. Nice." : "Nothing here.";
-    content.insertAdjacentHTML("beforeend", `<div class="empty"><div class="big">🎉</div><div>${msg}</div></div>`);
+    content.insertAdjacentHTML("beforeend", `<div class="empty"><div class="big">🎉</div><div>Nothing here.</div></div>`);
     return;
   }
-  list.forEach((t) => content.appendChild(taskRow(t)));
+  if (state.grouped) renderGrouped(content, list);
+  else list.forEach((t) => content.appendChild(taskRow(t)));
+}
+
+function renderGrouped(content, list) {
+  const groups = {};
+  list.forEach((t) => { const g = t.group || "Ungrouped"; (groups[g] = groups[g] || []).push(t); });
+  const names = Object.keys(groups).sort((a, b) =>
+    a === "Ungrouped" ? 1 : b === "Ungrouped" ? -1 : a.toLowerCase().localeCompare(b.toLowerCase()));
+  names.forEach((name) => {
+    const collapsed = state.collapsed.has(name);
+    const hdr = document.createElement("div");
+    hdr.className = "group-head";
+    hdr.innerHTML = `<span class="caret">${collapsed ? "▶" : "▼"}</span><span class="gname">${escapeHtml(name)}</span><span class="gcount">${groups[name].length}</span>`;
+    hdr.onclick = () => { if (collapsed) state.collapsed.delete(name); else state.collapsed.add(name); saveState(); render(); };
+    content.appendChild(hdr);
+    if (!collapsed) groups[name].forEach((t) => content.appendChild(taskRow(t)));
+  });
+}
+
+/* ---------- filter bar ---------- */
+function syncFilterBar() {
+  document.getElementById("f_time").value = state.time;
+  document.getElementById("f_minprio").value = state.minPrio;
+  const gb = document.getElementById("f_group");
+  gb.classList.toggle("on", state.grouped);
+  document.getElementById("f_collapse").hidden = !state.grouped;
+  // Time is ignored for archived categories — show a hint.
+  const archived = ["done", "deleted", "suspended"].includes(state.category);
+  document.getElementById("f_time").disabled = archived;
+  document.getElementById("f_hint").textContent = archived ? "(time filter n/a for this view)" : "";
 }
 
 /* ---------- toast ---------- */
@@ -355,21 +410,15 @@ function showToast(msg, actionLabel, actionFn) {
   if (!el) { el = document.createElement("div"); el.id = "toast"; el.className = "toast"; document.body.appendChild(el); }
   el.innerHTML = "";
   const span = document.createElement("span"); span.textContent = msg; el.appendChild(span);
-  if (actionLabel && actionFn) {
-    const b = document.createElement("button"); b.textContent = actionLabel;
-    b.onclick = () => { hideToast(); actionFn(); };
-    el.appendChild(b);
-  }
+  if (actionLabel && actionFn) { const b = document.createElement("button"); b.textContent = actionLabel; b.onclick = () => { hideToast(); actionFn(); }; el.appendChild(b); }
   el.classList.add("show");
-  clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(hideToast, 5000);
+  clearTimeout(_toastTimer); _toastTimer = setTimeout(hideToast, 5000);
 }
 function hideToast() { const el = document.getElementById("toast"); if (el) el.classList.remove("show"); }
 
 /* ---------- modal (add + edit) ---------- */
 function val(id) { return document.getElementById(id).value; }
 function setVal(id, v) { document.getElementById(id).value = v; }
-
 function openModal(task) {
   editingId = task ? task.id : null;
   document.getElementById("m_modalTitle").textContent = task ? "Edit task" : "Add a task";
@@ -384,37 +433,21 @@ function openModal(task) {
   document.getElementById("m_title").focus();
 }
 function closeModal() { document.getElementById("overlay").classList.remove("open"); }
-
 async function saveModal() {
   const title = val("m_title").trim();
   if (!title) return;
-  const payload = {
-    title, due: val("m_due").trim(), priority: val("m_prio"),
-    repeat: val("m_repeat"), group: val("m_group").trim(), notes: val("m_notes"),
-  };
+  const payload = { title, due: val("m_due").trim(), priority: val("m_prio"), repeat: val("m_repeat"), group: val("m_group").trim(), notes: val("m_notes") };
   if (editingId != null) {
-    if (LIVE) {
-      try {
-        const u = await api("PATCH", `/api/tasks/${editingId}`, payload);
-        const i = tasks.findIndex((t) => t.id === editingId);
-        if (i >= 0) tasks[i] = u;
-      } catch (e) {}
-    } else {
-      const t = tasks.find((x) => x.id === editingId);
-      if (t) { t.title = title; t.due = parseQuickDue(payload.due); t.priority = payload.priority; t.repeat = payload.repeat; t.group = payload.group; t.notes = payload.notes; }
-    }
+    if (LIVE) { try { const u = await api("PATCH", `/api/tasks/${editingId}`, payload); const i = tasks.findIndex((t) => t.id === editingId); if (i >= 0) tasks[i] = u; } catch (e) {} }
+    else { const t = tasks.find((x) => x.id === editingId); if (t) { t.title = title; t.due = parseQuickDue(payload.due); t.priority = payload.priority; t.repeat = payload.repeat; t.group = payload.group; t.notes = payload.notes; } }
   } else {
-    if (LIVE) {
-      try { tasks.push(await api("POST", "/api/tasks", payload)); } catch (e) {}
-    } else {
-      tasks.push({ id: nextId++, title, due: parseQuickDue(payload.due), priority: payload.priority, repeat: payload.repeat, group: payload.group, notes: payload.notes, done: false, times: 0 });
-    }
+    if (LIVE) { try { tasks.push(await api("POST", "/api/tasks", payload)); } catch (e) {} }
+    else { tasks.push({ id: nextId++, title, due: parseQuickDue(payload.due), priority: payload.priority, repeat: payload.repeat, group: payload.group, notes: payload.notes, done: false, times: 0 }); }
   }
-  closeModal();
-  render();
+  closeModal(); render();
 }
 
-/* ---------- misc helpers ---------- */
+/* ---------- misc ---------- */
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 function setTheme(mode, persist) {
   document.documentElement.setAttribute("data-theme", mode);
@@ -436,19 +469,28 @@ function parseQuickDue(s) {
 
 /* ---------- init ---------- */
 async function init() {
-  setTheme(currentTheme(), false); // inline <head> script already chose saved/system
+  setTheme(currentTheme(), false);
   document.getElementById("themeBtn").onclick = () => setTheme(currentTheme() === "dark" ? "light" : "dark", true);
+  document.getElementById("gearBtn").onclick = (e) => { e.stopPropagation(); const r = e.target.getBoundingClientRect(); popupMenu(r.right - 180, r.bottom + 4, [{ label: "↺  Reset hazard escalation", fn: resetHazard }]); };
   document.getElementById("search").oninput = (e) => { state.search = e.target.value; render(); };
   document.getElementById("menuBtn").onclick = () => document.getElementById("sidebar").classList.toggle("open");
   document.getElementById("addBtn").onclick = () => openModal(null);
   document.getElementById("m_cancel").onclick = closeModal;
   document.getElementById("m_save").onclick = saveModal;
+  document.getElementById("f_time").onchange = (e) => { state.time = e.target.value; saveState(); render(); };
+  document.getElementById("f_minprio").onchange = (e) => { state.minPrio = e.target.value; saveState(); render(); };
+  document.getElementById("f_group").onclick = () => { state.grouped = !state.grouped; saveState(); render(); };
+  document.getElementById("f_collapse").onclick = () => {
+    const names = new Set([...document.querySelectorAll(".group-head .gname")].map((e) => e.textContent));
+    const anyOpen = [...document.querySelectorAll(".group-head .caret")].some((c) => c.textContent === "▼");
+    if (anyOpen) names.forEach((n) => state.collapsed.add(n)); else state.collapsed.clear();
+    saveState(); render();
+  };
   const overlay = document.getElementById("overlay");
   overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
-  document.addEventListener("click", closeContextMenu);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeContextMenu(); closeModal(); } });
+  document.addEventListener("click", closeMenu);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeMenu(); closeModal(); } });
   await loadData();
   render();
 }
-
 document.addEventListener("DOMContentLoaded", init);

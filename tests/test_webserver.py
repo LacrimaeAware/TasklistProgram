@@ -16,9 +16,26 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(c["times"], 5)
         self.assertEqual(c["priority"], "H")
 
-    def test_visible_excludes_deleted(self):
+    def test_client_tasks_includes_deleted_with_flag(self):
+        # The client now receives ALL tasks (incl. deleted) so it can show a
+        # Deleted view / restore — deletion is conveyed via the is_deleted flag.
         db = {"tasks": [{"id": 1, "is_deleted": True}, {"id": 2}]}
-        self.assertEqual([t["id"] for t in ws.visible_tasks(db)], [2])
+        out = ws.client_tasks(db)
+        self.assertEqual([t["id"] for t in out], [1, 2])
+        self.assertEqual([t["is_deleted"] for t in out], [True, False])
+
+
+class HazardResetTests(unittest.TestCase):
+    def test_reset_clears_skip_and_restores_base_priority(self):
+        db = {"tasks": [
+            {"id": 1, "skip_count": 3, "priority": "U", "base_priority": "M"},
+            {"id": 2, "skip_count": 0, "priority": "L"},
+        ]}
+        count = ws.op_reset_hazard(db)
+        self.assertGreaterEqual(count, 1)
+        self.assertEqual(db["tasks"][0]["skip_count"], 0)
+        self.assertEqual(db["tasks"][0]["priority"], "M")
+        self.assertNotIn("base_priority", db["tasks"][0])
 
 
 class OpAddTests(unittest.TestCase):

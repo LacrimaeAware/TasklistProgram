@@ -51,7 +51,32 @@
         </div>
         <button class="btn primary" id="addBtn">+ Add task</button>
         <button class="icon-btn" id="themeBtn" title="Toggle theme">🌙</button>
+        <button class="icon-btn" id="gearBtn" title="Settings">⚙</button>
       </header>
+
+      <div class="filterbar">
+        <label class="fl">When
+          <select id="f_time">
+            <option value="any">Any time</option>
+            <option value="today" selected>Today</option>
+            <option value="week">This week</option>
+            <option value="month">This month</option>
+          </select>
+        </label>
+        <label class="fl">Min priority
+          <select id="f_minprio">
+            <option value="all" selected>All</option>
+            <option value="H">High+</option>
+            <option value="M">Medium+</option>
+            <option value="L">Low+</option>
+            <option value="D">Daily+</option>
+            <option value="X">Misc+</option>
+          </select>
+        </label>
+        <button class="chip-btn" id="f_group" title="Group tasks by their group, with collapsible headers">▤ Group</button>
+        <button class="chip-btn" id="f_collapse" hidden>Collapse all</button>
+        <span class="fl-hint" id="f_hint"></span>
+      </div>
 
       <div class="content" id="content"></div>
     </main>

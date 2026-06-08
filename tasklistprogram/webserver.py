@@ -11,6 +11,7 @@ This is local-first: it binds to 127.0.0.1 by default and reads/writes the same
 """
 import json
 import sys
+import threading
 import mimetypes
 from datetime import datetime, date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,6 +23,10 @@ from .core.dates import parse_due_entry, fmt_due_for_store, parse_stored_due, ne
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
+
+# Serializes the read-modify-write cycle so concurrent requests (the server is
+# threaded) can't clobber each other's changes.
+_DB_LOCK = threading.Lock()
 
 
 # ---------- task <-> client adapters ----------
@@ -38,12 +43,30 @@ def to_client(t: dict) -> dict:
         "completed_at": t.get("completed_at", ""),
         "times": t.get("times_completed", 0),
         "suspended": bool(t.get("is_suspended")),
+        "skip_count": int(t.get("skip_count", 0) or 0),
+        "is_deleted": bool(t.get("is_deleted")),
         "history": t.get("history", []),
     }
 
 
-def visible_tasks(db: dict) -> list:
-    return [to_client(t) for t in db["tasks"] if not t.get("is_deleted")]
+def op_reset_hazard(db: dict) -> int:
+    """Clear hazard escalation for all tasks (mirror the desktop reset). Returns count."""
+    changed = 0
+    for t in db.get("tasks", []):
+        if int(t.get("skip_count", 0) or 0) != 0:
+            t["skip_count"] = 0
+            changed += 1
+        if "base_priority" in t:
+            t["priority"] = t.get("base_priority", t.get("priority", "M"))
+            t.pop("base_priority", None)
+            changed += 1
+    return changed
+
+
+def client_tasks(db: dict) -> list:
+    # Return ALL tasks (including deleted) so the client can filter by category
+    # exactly like the desktop, including a Deleted view with restore.
+    return [to_client(t) for t in db["tasks"]]
 
 
 # ---------- operations (mirror the desktop, minus Tk) ----------
@@ -186,26 +209,41 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if path == "/api/tasks":
-            db = model.load_db()
-            return self._send_json({"tasks": visible_tasks(db), "settings": db.get("settings", {})})
+            with _DB_LOCK:
+                db = model.load_db()
+                payload = {"tasks": client_tasks(db), "settings": db.get("settings", {})}
+            return self._send_json(payload)
         if path == "/api/stats":
-            return self._send_json(model.stats_summary(model.load_db()))
+            with _DB_LOCK:
+                stats = model.stats_summary(model.load_db())
+            return self._send_json(stats)
         return self._serve_static(path)
 
     def do_POST(self):
         path = urlparse(self.path).path
         if path == "/api/tasks":
-            db = model.load_db()
-            try:
-                t = op_add(db, self._read_json())
-            except ValueError as e:
-                return self._send_json({"error": str(e)}, 400)
-            model.save_db(db)
-            return self._send_json(to_client(t), 201)
+            payload = self._read_json()
+            with _DB_LOCK:
+                db = model.load_db()
+                try:
+                    t = op_add(db, payload)
+                except ValueError as e:
+                    return self._send_json({"error": str(e)}, 400)
+                model.save_db(db)
+                client = to_client(t)
+            return self._send_json(client, 201)
+        if path == "/api/hazard/reset":
+            with _DB_LOCK:
+                db = model.load_db()
+                count = op_reset_hazard(db)
+                model.save_db(db)
+            return self._send_json({"ok": True, "reset": count})
         if path.startswith("/api/tasks/") and path.endswith("/toggle"):
             return self._mutate_one(path.split("/")[3], op_toggle)
         if path.startswith("/api/tasks/") and path.endswith("/done"):
             return self._mutate_one(path.split("/")[3], op_mark_done)
+        if path.startswith("/api/tasks/") and path.endswith("/harddelete"):
+            return self._hard_delete(path.split("/")[3])
         return self._send_json({"error": "not found"}, 404)
 
     def do_PATCH(self):
@@ -229,13 +267,29 @@ class Handler(BaseHTTPRequestHandler):
             tid = int(raw_id)
         except ValueError:
             return self._send_json({"error": "bad id"}, 400)
-        db = model.load_db()
-        t = self._find(db, tid)
-        if not t:
-            return self._send_json({"error": "not found"}, 404)
-        fn(t)
-        model.save_db(db)
-        return self._send_json(to_client(t))
+        with _DB_LOCK:
+            db = model.load_db()
+            t = self._find(db, tid)
+            if not t:
+                return self._send_json({"error": "not found"}, 404)
+            fn(t)
+            model.save_db(db)
+            client = to_client(t)
+        return self._send_json(client)
+
+    def _hard_delete(self, raw_id):
+        try:
+            tid = int(raw_id)
+        except ValueError:
+            return self._send_json({"error": "bad id"}, 400)
+        with _DB_LOCK:
+            db = model.load_db()
+            before = len(db["tasks"])
+            db["tasks"] = [t for t in db["tasks"] if t["id"] != tid]
+            if len(db["tasks"]) == before:
+                return self._send_json({"error": "not found"}, 404)
+            model.save_db(db)
+        return self._send_json({"ok": True})
 
     def _serve_static(self, path):
         if path in ("/", ""):
