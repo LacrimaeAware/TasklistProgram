@@ -160,6 +160,7 @@ See [`CLAUDE.md`](CLAUDE.md) for a one-page project profile, and
 [`docs/`](docs/README.md) for everything:
 
 - [User Guide](docs/USER_GUIDE.md) — every feature explained.
+- [Importing](docs/IMPORTING.md) — bulk-import format + a copy-paste **AI prompt** to format tasks.
 - [Architecture](docs/ARCHITECTURE.md) — module map, data flow, file formats, web server.
 - [Features & parity](docs/FEATURES.md) — desktop ↔ web feature matrix.
 - [Design](docs/DESIGN.md) — UI direction and the web/mobile + privacy plan.

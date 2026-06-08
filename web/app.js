@@ -435,6 +435,45 @@ function openModal(task) {
 function closeModal() { document.getElementById("overlay").classList.remove("open"); }
 
 /* ---------- import ---------- */
+const AI_IMPORT_PROMPT = `You convert a list of tasks into the import format for the "Tiny Tasklist" app.
+Output ONLY the formatted lines — one task per line, no preamble, no bullets, no code fences.
+
+Format per line:
+Title | due: <value> | prio: <H|M|L|D|Misc> | repeat: <value> | group: <name> | notes: <text>
+
+Rules:
+- Only Title is required. Include a field only if it's known; omit empty fields.
+- Separate fields with " | ". Never put the "|" character inside a field.
+- If a title contains a colon, prefix it: "title: Meeting: standup".
+- prio is one of H (high), M (medium), L (low), D (daily habit -> auto daily repeat), Misc. Never use U/Ultra.
+- repeat is one of none, daily, weekdays, weekly, bi-weekly, monthly, or custom:N (every N days, N a positive integer).
+- due accepts: YYYY-MM-DD, "YYYY-MM-DD HH:MM", MM/DD, "MM/DD HH:MM", HH:MM or HHMM (today),
+  today/tomorrow/yesterday (optionally + a time), a weekday (mon..sun), a month name + day
+  ("Sept 29", optionally + year/time), morning/noon/afternoon/evening, midnight,
+  or relative tokens like "+2d +3h" (d=days, h=hours, m=minutes, w=weeks).
+  Do NOT mix natural words with relative tokens (e.g. "+1w friday" is invalid).
+- group is a short Title-Case category (e.g. Health, School, Life Admin).
+- If you're unsure of a field, leave it out rather than guessing.
+
+Example output:
+Buy groceries
+Take vitamins | repeat: daily | prio: D | group: Health
+Pay rent | due: +5d | prio: H | group: Life Admin
+
+Now convert the following into this format:
+<PASTE YOUR TASKS HERE>`;
+
+async function copyAiPrompt() {
+  try {
+    await navigator.clipboard.writeText(AI_IMPORT_PROMPT);
+    showToast("AI prompt copied — paste it into an AI with your tasks");
+  } catch (e) {
+    // Fallback: drop it into the textarea so it's still selectable/copyable.
+    document.getElementById("imp_text").value = AI_IMPORT_PROMPT;
+    showToast("Copy failed — prompt placed in the box; select & copy it");
+  }
+}
+
 function openImport() {
   document.getElementById("imp_text").value = "";
   document.getElementById("importOverlay").classList.add("open");
@@ -522,6 +561,7 @@ async function init() {
   impOverlay.onclick = (e) => { if (e.target === impOverlay) closeImport(); };
   document.getElementById("imp_cancel").onclick = closeImport;
   document.getElementById("imp_go").onclick = doImport;
+  document.getElementById("imp_prompt").onclick = copyAiPrompt;
   document.addEventListener("click", closeMenu);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeMenu(); closeModal(); closeImport(); } });
   await loadData();

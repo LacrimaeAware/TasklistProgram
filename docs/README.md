@@ -6,6 +6,7 @@ Start with [`../CLAUDE.md`](../CLAUDE.md) for a one-page project profile (humans
 |---|---|
 | [OVERVIEW → CLAUDE.md](../CLAUDE.md) | Fast map: what it is, how to run, layout, conventions, current state. |
 | [USER_GUIDE.md](USER_GUIDE.md) | Every feature explained, for end users. |
+| [IMPORTING.md](IMPORTING.md) | The bulk-import format + a copy-paste AI prompt to format tasks. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Module map, data flow, the JSON schema, web server + concurrency model. |
 | [FEATURES.md](FEATURES.md) | Feature inventory + desktop ↔ web parity matrix. |
 | [DESIGN.md](DESIGN.md) | Design principles, UI direction, and the web/mobile + privacy plan. |

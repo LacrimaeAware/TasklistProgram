@@ -179,6 +179,10 @@ Title | due: <date/time/+rel> | prio: H/M/L/D/Misc | repeat: none/daily/weekdays
   (e.g. `custom:6`).
 - Lines that fail to parse are reported with the reason; the rest still import.
 
+**Got a messy list?** See [IMPORTING.md](IMPORTING.md) for the full format and a
+**copy-paste AI prompt** — hand an AI your raw tasks and it returns clean importable
+lines. In the web import dialog, the **“Copy AI prompt”** button copies it for you.
+
 Examples:
 
 ```

@@ -4,11 +4,15 @@ Notable changes, newest first. Dates are local. This was a doc-sparse project ea
 on (pre-AI-assist), so entries before 2026-06 are reconstructed from git history and
 are coarser.
 
-## 2026-06-08 — Web import + hosting guidance
+## 2026-06-08 — Web import + import guide/AI prompt + hosting guidance
 
 - **Import on the web** (⚙ → Import tasks…): paste pipe-format lines, parsed by the
   same `io_import` core as the desktop, via a new `POST /api/import`. Reports added /
   skipped counts. Answers "how do I upload tasks?" on the web.
+- **`docs/IMPORTING.md`** — the precise import format **plus a copy-paste AI prompt**
+  so you can hand an AI a messy task list and get back clean importable lines. The web
+  import dialog has a **“Copy AI prompt”** button; desktop Help and the User Guide link
+  it. (Verified the prompt matches what the parser actually accepts.)
 - **DESIGN.md:** documented concrete **sharing & hosting** options (run-your-own-copy /
   self-host + Cloudflare Tunnel / multi-user), and why Netlify alone can't host it.
 - **IDEAS.md:** captured the **task-bundle / one-click-complete-a-set** idea
