@@ -7,7 +7,7 @@ from typing import Optional, Tuple, List
 from datetime import datetime, date, timedelta
 
 from .core.dates import parse_due_flexible, parse_due_entry, fmt_due_for_store
-from .core.model import load_db, save_db, get_task, delete_task, stats_summary, normalize_settings
+from .core.model import load_db, save_db, get_task, delete_task, stats_summary, normalize_settings, current_rev
 from .core import filters, scheduler
 from .ui.dialogs import (
     EditDialog,
@@ -318,6 +318,21 @@ class TaskApp(ActionsMixin, tk.Tk):
         # Keyboard shortcuts
         self.bind("<Delete>", lambda e: self.soft_delete())
         self.bind("<Control-Return>", lambda e: self.mark_done())
+
+        # Pick up external edits (e.g. from the web app) when the window regains focus.
+        self.bind("<FocusIn>", self._on_focus_in)
+
+    def _on_focus_in(self, event=None):
+        """Reload if the store changed externally since our last read (web edits)."""
+        if event is not None and event.widget is not self:
+            return  # ignore focus events from child widgets
+        try:
+            rev = current_rev()
+            if rev is not None and rev != self.db.get("_rev"):
+                self.db = load_db()
+                self.refresh()
+        except Exception:
+            pass
     # ===== Repeat resets =====
     def schedule_midnight_reset(self):
         now = datetime.now()

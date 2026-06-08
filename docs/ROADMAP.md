@@ -134,12 +134,12 @@ and web push (see [DESIGN.md](DESIGN.md)).
 
 ## Next up (prioritized)
 
-1. **SQLite single source of truth** (DESIGN.md Phase 1). Move persistence behind
-   `model.py` to SQLite so the desktop and web can't clobber each other, with proper
-   atomic writes. Highest priority — it's both a correctness fix (the concurrency
-   caveat) and the foundation for the hosted/phone version.
-2. **Auth layer** scaffolding (DESIGN.md Phase 3) before anything is reachable
-   off-machine.
+1. ✅ **SQLite single source of truth** — *done (2026-06-08).* Persistence moved to
+   `data/tasks.db` behind `model.py` with atomic transactions; lossless JSON migration
+   (kept as `.premigration`); desktop reload-on-focus via a `rev` counter closes the
+   clobber window for normal use. *Future hardening:* per-row granular writes.
+2. **Auth layer** scaffolding (DESIGN.md Phase 3) — now the top priority, before
+   anything is reachable off-machine. Single-user password + session tokens, HTTPS.
 3. **Smart / fewer groups.** With ~20 groups the list is noisy. Ideas: collapse
    rarely-used groups, group-of-groups (sections), or **auto-grouping related tasks
    by context** (e.g. supplements taken together, a "morning routine"). Possibly

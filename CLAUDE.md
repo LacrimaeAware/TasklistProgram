@@ -43,9 +43,12 @@ docs/               all documentation (see docs/README.md)
 ```
 
 ## Data (gitignored — never commit)
-`tasklistprogram/data/`: `tasks_gui.json` (+ `.bak`), `backups/tasks_gui_YYYY-MM-DD.json`
-(14-day rotation), `task_documents/<Group>/<Title>-<id>.md`, `journals/YYYY/MM/*.md`,
-`mantras.md`. Override location with the `TINYTASKLIST_DATA_DIR` env var.
+`tasklistprogram/data/`: **`tasks.db`** (SQLite, the primary store) + `tasks_gui.json.bak`
+(previous state, JSON) + `tasks_gui.json.premigration` (the original pre-SQLite JSON,
+kept for safety) + `backups/tasks_gui_YYYY-MM-DD.json` (14-day rotation) +
+`task_documents/<Group>/<Title>-<id>.md` + `journals/YYYY/MM/*.md` + `mantras.md`.
+Override location with the `TINYTASKLIST_DATA_DIR` env var. **In tests/manual runs,
+always point that env var (and/or `model.DB_FILE`) at a temp dir — never the real store.**
 
 ## Conventions
 - **Zero runtime dependencies.** Tests use stdlib `unittest`. Keep it that way.
@@ -62,6 +65,7 @@ docs/               all documentation (see docs/README.md)
 - **Plan & priorities**: [docs/ROADMAP.md](docs/ROADMAP.md)  ·  **Ideas**: [docs/IDEAS.md](docs/IDEAS.md)
 - **Direction (UI, web/mobile, privacy)**: [docs/DESIGN.md](docs/DESIGN.md)
 
-**Known caveat:** desktop and web both write the same file (desktop holds an
-in-memory copy; web reads fresh per request), so simultaneous edits can clobber
-(last-writer-wins). The **SQLite migration** (ROADMAP #1) is the fix.
+**Concurrency:** storage is SQLite (atomic transactions); the web reads fresh per
+request and the desktop reloads on focus when the store's `rev` changed — so the two
+front-ends stay consistent for normal single-user use. (Per-row granular writes are a
+future hardening for the simultaneous-same-task edge case.)

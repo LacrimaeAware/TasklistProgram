@@ -1,5 +1,6 @@
 import json
 import os
+import sqlite3
 from pathlib import Path
 from datetime import datetime, date, timedelta
 from typing import Optional, Dict, Any, List
@@ -10,7 +11,8 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 # web server) via the TINYTASKLIST_DATA_DIR environment variable.
 _ENV_DATA_DIR = os.environ.get("TINYTASKLIST_DATA_DIR")
 DATA_DIR = Path(_ENV_DATA_DIR) if _ENV_DATA_DIR else (ROOT_DIR / "data")
-DATA_FILE = DATA_DIR / "tasks_gui.json"
+DB_FILE = DATA_DIR / "tasks.db"            # primary store (SQLite)
+DATA_FILE = DATA_DIR / "tasks_gui.json"    # legacy JSON (migrated from, then kept as .premigration)
 BACKUP_FILE = DATA_DIR / "tasks_gui.json.bak"
 BACKUP_DIR = DATA_DIR / "backups"
 DAILY_BACKUPS_KEEP = 14  # ~2 weeks of point-in-time recovery; cheap (one write/day)
@@ -68,21 +70,106 @@ def normalize_settings(settings: dict) -> dict:
     merged.update(incoming)
     return merged
 
+# ===== SQLite storage =====
+# Tasks are stored one-per-row as a JSON blob (lossless, schema-flexible); meta holds
+# version / next_id / settings / rev. Writes happen inside a transaction, so a save
+# is atomic and can't leave a half-written/corrupt store the way a raw file can.
+
+def _connect() -> sqlite3.Connection:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_FILE, timeout=15)
+    conn.execute("PRAGMA journal_mode=WAL")     # better concurrency across processes
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+def _init_schema(conn: sqlite3.Connection) -> None:
+    conn.execute("CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, data TEXT NOT NULL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+    conn.commit()
+
+def _read_all(conn: sqlite3.Connection) -> dict:
+    tasks = [json.loads(r[0]) for r in conn.execute("SELECT data FROM tasks ORDER BY id")]
+    meta = {k: json.loads(v) for k, v in conn.execute("SELECT key, value FROM meta")}
+    next_id = meta.get("next_id")
+    if not isinstance(next_id, int) or next_id < 1:
+        next_id = (max((t.get("id", 0) for t in tasks), default=0) + 1)
+    return {
+        "version": meta.get("version", 1),
+        "next_id": next_id,
+        "settings": meta.get("settings", {}),
+        "tasks": tasks,
+        "_rev": meta.get("rev", 0),
+    }
+
+def _write_all(conn: sqlite3.Connection, db: dict) -> int:
+    rev = 0
+    row = conn.execute("SELECT value FROM meta WHERE key='rev'").fetchone()
+    if row:
+        try:
+            rev = int(json.loads(row[0]))
+        except Exception:
+            rev = 0
+    new_rev = rev + 1
+    with conn:  # single atomic transaction
+        conn.execute("DELETE FROM tasks")
+        conn.executemany(
+            "INSERT INTO tasks(id, data) VALUES(?, ?)",
+            [(t["id"], json.dumps(t)) for t in db.get("tasks", [])],
+        )
+        conn.execute("DELETE FROM meta")
+        conn.executemany("INSERT INTO meta(key, value) VALUES(?, ?)", [
+            ("version", json.dumps(db.get("version", 1))),
+            ("next_id", json.dumps(db.get("next_id", 1))),
+            ("settings", json.dumps(db.get("settings", {}))),
+            ("rev", json.dumps(new_rev)),
+        ])
+    return new_rev
+
+def _migrate_from_json_if_needed(conn: sqlite3.Connection) -> None:
+    """One-time import of the legacy JSON into SQLite, preserving the original file."""
+    if conn.execute("SELECT 1 FROM tasks LIMIT 1").fetchone():
+        return
+    if conn.execute("SELECT 1 FROM meta LIMIT 1").fetchone():
+        return
+    if not DATA_FILE.exists():
+        return  # fresh install, nothing to migrate
+    try:
+        data = _load_json(DATA_FILE)
+    except Exception:
+        if BACKUP_FILE.exists():
+            data = _load_json(BACKUP_FILE)
+        else:
+            return
+    _write_all(conn, data)
+    # Keep the original JSON forever as a safety copy (do not delete).
+    try:
+        DATA_FILE.replace(DATA_FILE.parent / (DATA_FILE.name + ".premigration"))
+    except OSError:
+        pass
+
+def current_rev():
+    """Cheap read of the store's revision counter (for change detection). None on error."""
+    try:
+        conn = _connect()
+        _init_schema(conn)
+        row = conn.execute("SELECT value FROM meta WHERE key='rev'").fetchone()
+        conn.close()
+        return int(json.loads(row[0])) if row else 0
+    except Exception:
+        return None
+
 def load_db():
-    if not DATA_FILE.exists() and LEGACY_DATA_FILE.exists():
+    # Legacy: a JSON file left at the repo root migrates into the data dir first.
+    if not DB_FILE.exists() and not DATA_FILE.exists() and LEGACY_DATA_FILE.exists():
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         LEGACY_DATA_FILE.replace(DATA_FILE)
         if LEGACY_BACKUP_FILE.exists():
             LEGACY_BACKUP_FILE.replace(BACKUP_FILE)
-    if not DATA_FILE.exists():
-        return {"version": 1, "tasks": [], "next_id": 1}
-    try:
-        db = _load_json(DATA_FILE)
-    except json.JSONDecodeError:
-        if BACKUP_FILE.exists():
-            db = _load_json(BACKUP_FILE)
-        else:
-            raise
+    conn = _connect()
+    _init_schema(conn)
+    _migrate_from_json_if_needed(conn)
+    db = _read_all(conn)
+    conn.close()
     if "version" not in db:
         db["version"] = 1
     db["settings"] = normalize_settings(db.get("settings", {}))
@@ -109,12 +196,18 @@ def _rotate_daily_backup(payload: dict):
         pass
 
 def save_db(db):
-    if DATA_FILE.exists():
-        try:
-            _atomic_write_json(BACKUP_FILE, _load_json(DATA_FILE))
-        except json.JSONDecodeError:
-            pass
-    _atomic_write_json(DATA_FILE, db)
+    conn = _connect()
+    _init_schema(conn)
+    # .bak = the previous good state as readable JSON, for quick manual recovery.
+    try:
+        prev = _read_all(conn)
+        if prev["tasks"] or prev["settings"]:
+            _atomic_write_json(BACKUP_FILE, prev)
+    except Exception:
+        pass
+    new_rev = _write_all(conn, db)
+    conn.close()
+    db["_rev"] = new_rev  # keep the caller's dict in sync so it knows its own write
     _rotate_daily_backup(db)
 
 def get_task(db, tid: int):

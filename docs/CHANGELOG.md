@@ -4,12 +4,22 @@ Notable changes, newest first. Dates are local. This was a doc-sparse project ea
 on (pre-AI-assist), so entries before 2026-06 are reconstructed from git history and
 are coarser.
 
-## 2026-06-08 — Backups + documentation system
+## 2026-06-08 — SQLite migration + backups + documentation system
 
-- **Automatic daily backups.** `save_db` now writes a dated snapshot to
-  `data/backups/tasks_gui_YYYY-MM-DD.json`, pruned to the last 14 days, in addition
-  to the immediate `.bak`. Cheap (one write/day), never breaks a save.
-- **Documentation overhaul** (this set): `CLAUDE.md` project profile, `docs/FEATURES.md`
+- **Storage moved to SQLite** (`data/tasks.db`) behind the same `load_db()/save_db()`
+  API, so both front-ends are unchanged. Saves are atomic transactions (no
+  corruption). The legacy `tasks_gui.json` is **migrated losslessly on first run**
+  and kept as `tasks_gui.json.premigration`. Verified lossless on a copy of the real
+  data (268 tasks, all history/completions preserved).
+- **Concurrency closed for normal use:** a `rev` counter + the desktop reloading on
+  window focus (`current_rev`) means it picks up web edits before you act; combined
+  with atomic writes and per-request web reads, the last-writer-wins window is gone.
+  (Per-row granular writes remain a future hardening for the simultaneous-same-task
+  edge case.)
+- **Automatic daily backups.** `save_db` writes a dated snapshot to
+  `data/backups/tasks_gui_YYYY-MM-DD.json`, pruned to the last 14 days, plus a `.bak`
+  of the previous state. Cheap, never breaks a save.
+- **Documentation overhaul:** `CLAUDE.md` project profile, `docs/FEATURES.md`
   (desktop↔web parity matrix), this changelog, `docs/IDEAS.md`, `docs/BUGS.md`, and a
   `docs/README.md` index. README/ROADMAP cross-linked.
 

@@ -7,11 +7,6 @@ Severity: 🔴 high · 🟠 medium · 🟡 low.
 
 ## Open
 
-- 🔴 **Desktop ↔ web concurrent-edit clobber.** Both front-ends write the same JSON;
-  the desktop holds an in-memory copy and saves on each action, while the web reads
-  fresh per request. Editing in both at once can lose a change (last-writer-wins).
-  *Mitigated:* web writes are now lock-serialized and daily backups exist. *Real fix:*
-  SQLite single source of truth (ROADMAP #1). `core/model.py`, `webserver.py`.
 - 🟠 **Desktop stats undercount recurring "done today".** `model.stats_summary`
   counts only `completed_at`, which is cleared when a recurring task advances, so
   recurring completions today aren't counted. The web stat was fixed (uses history);
@@ -29,6 +24,11 @@ Severity: 🔴 high · 🟠 medium · 🟡 low.
 
 ## Fixed (recent)
 
+- ✅ **Desktop ↔ web concurrent-edit clobber** (was 🔴). Storage moved to SQLite with
+  atomic transactions; the desktop reloads on focus when the store `rev` changed, and
+  the web reads fresh per request — so for normal single-user use the last-writer-wins
+  window is closed. Residual: simultaneous same-task edits in both visible windows →
+  future per-row granular writes. `core/model.py`, `app.py`. (2026-06-08)
 - ✅ **Web front-end fully dead from a JS syntax error** (duplicate `title` in
   `renderHabits`) — nothing rendered, dark mode/edits did nothing. Fixed + added a
   `node --check` test guard. (2026-06-07)

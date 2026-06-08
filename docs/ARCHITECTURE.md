@@ -43,11 +43,14 @@ exception is `actions.py`, which is a mixin that also drives small dialogs) and 
   - It inherits task operations from `ActionsMixin`.
 
 ### core/ (business logic)
-- **`model.py`** — persistence and aggregates.
-  - `load_db()` / `save_db()` — JSON load and **atomic write** (`tmp` file +
-    `os.replace`) with a `.bak` backup of the prior version. Falls back to the
-    backup if the main file is corrupt. Migrates a legacy root-level data file
-    into `data/`.
+- **`model.py`** — persistence (SQLite) and aggregates.
+  - `load_db()` / `save_db()` — read/write the whole task dict to **SQLite**
+    (`data/tasks.db`) inside a single **transaction** (atomic; can't leave a
+    half-written store). On first run it **migrates** the legacy `tasks_gui.json`
+    into SQLite and keeps the original as `tasks_gui.json.premigration`. Each save
+    writes a JSON `.bak` (previous state) and bumps a `rev` counter.
+  - `current_rev()` — cheap revision read used by the desktop to detect external
+    edits (e.g. from the web app) and reload on window focus.
   - `default_settings()` / `normalize_settings()` — settings schema and migration
     of the old single `ui_filter_scope` into split `ui_category_scope` /
     `ui_time_scope`.
@@ -112,12 +115,20 @@ exception is `actions.py`, which is a mixin that also drives small dialogs) and 
 
 ## Storage format
 
-`data/tasks_gui.json`:
+Primary store is **SQLite** at `data/tasks.db`:
+- `tasks(id INTEGER PRIMARY KEY, data TEXT)` — one row per task; `data` is the task
+  as a JSON blob (lossless, schema-flexible — every field is preserved).
+- `meta(key, value)` — `version`, `next_id`, `settings` (JSON), and `rev` (a counter
+  bumped on each save, used for change detection).
+
+`load_db()` reconstructs the in-memory dict the rest of the app uses (so all other
+code is storage-agnostic):
 
 ```json
 {
   "version": 1,
   "next_id": 42,
+  "_rev": 17,
   "settings": { "...": "see default_settings()" },
   "tasks": [
     {
@@ -178,11 +189,16 @@ a web app — not two separate programs with separate data.
   toggle-with-undo / suspend / delete, a Today/Upcoming/Habits/All/Completed/Suspended
   nav, and a real streak heatmap from history.
 
-### Concurrency caveat (important)
-The web server reads the JSON **fresh on every request**, so it always reflects the
-latest save. The **desktop app loads once and holds an in-memory copy**, saving on
-each action. So if both are open and you edit in the desktop after the web wrote a
-change, the desktop's save can overwrite the web's change (last-writer-wins). For now:
-prefer editing in **one** front-end at a time. The planned **SQLite migration**
-(DESIGN.md, Phase 1) makes the data layer the single source of truth and removes this
-caveat.
+### Concurrency model
+Storage is now SQLite with atomic transactions, so a save can never corrupt the
+store, and concurrent web requests are serialized (a lock + SQLite locking). The two
+front-ends stay consistent because:
+- the **web server** reads fresh on every request (always current), and
+- the **desktop** reloads on window focus when the store's `rev` changed
+  (`_on_focus_in` → `current_rev()`), so it picks up web edits before you act.
+
+Since the desktop only saves on a user action — by which point the window has focus
+and has reloaded — the old last-writer-wins window is closed for normal use. The one
+remaining theoretical case is editing the *same* task in both visible windows
+simultaneously without any focus change; the belt-and-suspenders fix (per-row granular
+writes) is a future hardening, not required for single-user use.
