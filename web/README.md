@@ -25,6 +25,8 @@ by your actual `data/tasks_gui.json`:
 ```bash
 python -m tasklistprogram.webserver        # http://localhost:8000
 ```
+Or just **double-click `run_web.bat`** in the project root — it starts the server
+windowless and opens the browser for you.
 When the page loads from this server it auto-detects the API and switches to live
 data — you can add tasks and check them off, and changes persist to the same file
 the desktop app uses. The banner at the top tells you which mode you're in.
