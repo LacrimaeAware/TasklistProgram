@@ -44,6 +44,54 @@ class OpAddTests(unittest.TestCase):
         self.assertEqual(t["due"], (date.today() + timedelta(days=1)).strftime("%Y-%m-%d"))
 
 
+class OpUpdateTests(unittest.TestCase):
+    def base(self):
+        return {"id": 1, "title": "a", "due": "2026-01-01", "priority": "M", "repeat": "none",
+                "group": "", "notes": "", "completed_at": "", "times_completed": 0, "history": [],
+                "is_suspended": False, "is_deleted": False}
+
+    def test_update_basic_fields(self):
+        t = self.base()
+        ws.op_update(t, {"title": "b", "notes": "n", "group": "G", "priority": "H", "repeat": "weekly"})
+        self.assertEqual((t["title"], t["notes"], t["group"], t["priority"], t["repeat"]), ("b", "n", "G", "H", "weekly"))
+
+    def test_update_misc_and_daily(self):
+        t = self.base()
+        ws.op_update(t, {"priority": "Misc"})
+        self.assertEqual(t["priority"], "X")
+        ws.op_update(t, {"priority": "D"})
+        self.assertEqual((t["priority"], t["repeat"]), ("D", "daily"))
+
+    def test_update_due_parsed_and_cleared(self):
+        t = self.base()
+        ws.op_update(t, {"due": "tomorrow"})
+        from datetime import date, timedelta
+        self.assertEqual(t["due"], (date.today() + timedelta(days=1)).strftime("%Y-%m-%d"))
+        ws.op_update(t, {"due": ""})
+        self.assertEqual(t["due"], "")
+
+    def test_update_suspend_and_delete_flags(self):
+        t = self.base()
+        ws.op_update(t, {"is_suspended": True})
+        self.assertTrue(t["is_suspended"])
+        ws.op_update(t, {"is_deleted": True})
+        self.assertTrue(t["is_deleted"])
+
+    def test_update_restore_snapshot_for_undo(self):
+        t = self.base()
+        t.update({"due": "2026-02-02", "completed_at": "x", "times_completed": 9, "history": ["2026-01-01"]})
+        ws.op_update(t, {"due": "2026-01-01", "completed_at": "", "times": 8, "history": []})
+        self.assertEqual(t["due"], "2026-01-01")
+        self.assertEqual(t["completed_at"], "")
+        self.assertEqual(t["times_completed"], 8)
+        self.assertEqual(t["history"], [])
+
+    def test_update_ignores_blank_title(self):
+        t = self.base()
+        ws.op_update(t, {"title": "   "})
+        self.assertEqual(t["title"], "a")
+
+
 class OpDoneTests(unittest.TestCase):
     def test_mark_done_oneoff(self):
         t = {"id": 1, "title": "a", "repeat": "none", "due": "", "completed_at": "", "times_completed": 0}

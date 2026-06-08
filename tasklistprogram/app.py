@@ -90,6 +90,8 @@ class TaskApp(ActionsMixin, tk.Tk):
 
         view_menu = tk.Menu(menubar, tearoff=0)
         view_menu.add_command(label="Toggle Dark Mode", command=self.toggle_theme)
+        view_menu.add_separator()
+        view_menu.add_command(label="Open Web App in Browser", command=self.open_web_app)
         menubar.add_cascade(label="View", menu=view_menu)
 
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -407,6 +409,49 @@ class TaskApp(ActionsMixin, tk.Tk):
                 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TinyTasklist.App")
             except Exception:
                 pass
+
+    def open_web_app(self):
+        """Open the web version in the browser, starting the local server if needed.
+
+        The web app and this desktop app are two front-ends over the SAME data file;
+        this just launches the local server (if it isn't already running) and opens it.
+        """
+        import socket
+        import webbrowser
+        import subprocess
+        port = 8000
+
+        def _running():
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.4)
+            try:
+                s.connect(("127.0.0.1", port))
+                return True
+            except OSError:
+                return False
+            finally:
+                s.close()
+
+        if _running():
+            webbrowser.open(f"http://localhost:{port}")
+            return
+
+        try:
+            exe = sys.executable or "python"
+            pyw = exe.replace("python.exe", "pythonw.exe")
+            if Path(pyw).exists():
+                exe = pyw
+            root = Path(__file__).resolve().parent.parent
+            flags = subprocess.DETACHED_PROCESS if sys.platform.startswith("win") else 0
+            subprocess.Popen(
+                [exe, "-m", "tasklistprogram.webserver", str(port)],
+                cwd=str(root), creationflags=flags, close_fds=True,
+            )
+        except Exception as e:  # noqa: BLE001
+            messagebox.showerror("Web App", f"Could not start the web server:\n{e}")
+            return
+        # Give the server a moment to bind, then open the browser.
+        self.after(900, lambda: webbrowser.open(f"http://localhost:{port}"))
 
     # ===== Theming =====
     def _apply_theme(self, mode: str):

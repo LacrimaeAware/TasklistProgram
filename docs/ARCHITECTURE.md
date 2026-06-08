@@ -158,3 +158,31 @@ during hazard escalation), `bumped_count`, `deleted_at`, `updated_at`,
 - **Hazard escalation.** When enabled, missed recurrences raise `skip_count`;
   ≥2 → High (original saved to `base_priority`), ≥3 → Ultra, with a ⚠ title
   prefix. `mark_done` and the Settings "reset" clear it.
+
+## Web front-end & server (second front-end)
+
+There are **two front-ends over the same data file** — the Tkinter desktop app and
+a web app — not two separate programs with separate data.
+
+- **`webserver.py`** — a standard-library HTTP server (no dependencies). It serves
+  the static `web/` UI *and* a small JSON API (`GET /api/tasks`, `POST /api/tasks`,
+  `POST /api/tasks/{id}/toggle` and `/done`, `PATCH /api/tasks/{id}`,
+  `DELETE /api/tasks/{id}`, `GET /api/stats`). The API reuses `core/` (model, dates)
+  and reads/writes the **same `data/tasks_gui.json`**. Run with
+  `python -m tasklistprogram.webserver` or the desktop app's **View → Open Web App**.
+  It binds to `127.0.0.1` only (local, no auth — see DESIGN.md for the hosting phase).
+- **`web/`** — `index.html` + `styles.css` + `app.js` (+ `sample-data.js`). The UI
+  auto-detects the API: **live mode** when served by `webserver.py`, **sample mode**
+  when opened as a static file. It mirrors the desktop's filtering (active excludes
+  done **and suspended**), supports add / edit (click a row or right-click) /
+  toggle-with-undo / suspend / delete, a Today/Upcoming/Habits/All/Completed/Suspended
+  nav, and a real streak heatmap from history.
+
+### Concurrency caveat (important)
+The web server reads the JSON **fresh on every request**, so it always reflects the
+latest save. The **desktop app loads once and holds an in-memory copy**, saving on
+each action. So if both are open and you edit in the desktop after the web wrote a
+change, the desktop's save can overwrite the web's change (last-writer-wins). For now:
+prefer editing in **one** front-end at a time. The planned **SQLite migration**
+(DESIGN.md, Phase 1) makes the data layer the single source of truth and removes this
+caveat.

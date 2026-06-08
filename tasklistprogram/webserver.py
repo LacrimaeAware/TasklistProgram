@@ -73,6 +73,54 @@ def op_toggle(t: dict) -> None:
         op_mark_done(t)
 
 
+def op_update(t: dict, payload: dict) -> None:
+    """Apply an edit to a task (used by PATCH). Only updates provided fields.
+
+    Also accepts completed_at / times / history so the client can implement a
+    clean Undo by restoring a pre-toggle snapshot.
+    """
+    if "title" in payload:
+        title = (payload.get("title") or "").strip()
+        if title:
+            t["title"] = title
+    if "notes" in payload:
+        t["notes"] = payload.get("notes") or ""
+    if "group" in payload:
+        t["group"] = (payload.get("group") or "").strip()
+    if "repeat" in payload:
+        t["repeat"] = payload.get("repeat") or "none"
+    if "priority" in payload:
+        p = payload.get("priority") or "M"
+        p = "X" if str(p).lower() == "misc" else str(p).upper()
+        if p in ("U", "H", "M", "L", "D", "X"):
+            t["priority"] = p
+            if p == "D":
+                t["repeat"] = "daily"  # mirror the desktop Edit dialog
+    if "due" in payload:
+        due_s = (payload.get("due") or "").strip()
+        if due_s:
+            parsed = parse_due_entry(due_s)
+            if parsed is not None:
+                t["due"] = fmt_due_for_store(parsed)
+        else:
+            t["due"] = ""
+    if "is_suspended" in payload:
+        t["is_suspended"] = bool(payload["is_suspended"])
+    if "is_deleted" in payload:
+        t["is_deleted"] = bool(payload["is_deleted"])  # lets the client undo a delete
+    # Fields below let the client restore a snapshot for Undo.
+    if "completed_at" in payload:
+        t["completed_at"] = payload.get("completed_at") or ""
+    if "times" in payload:
+        try:
+            t["times_completed"] = int(payload["times"])
+        except (TypeError, ValueError):
+            pass
+    if "history" in payload and isinstance(payload["history"], list):
+        t["history"] = payload["history"]
+    t["updated_at"] = datetime.now().isoformat(timespec="seconds")
+
+
 def op_add(db: dict, payload: dict) -> dict:
     title = (payload.get("title") or "").strip()
     if not title:
@@ -158,6 +206,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._mutate_one(path.split("/")[3], op_toggle)
         if path.startswith("/api/tasks/") and path.endswith("/done"):
             return self._mutate_one(path.split("/")[3], op_mark_done)
+        return self._send_json({"error": "not found"}, 404)
+
+    def do_PATCH(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/tasks/") and path.count("/") == 3:
+            payload = self._read_json()
+            return self._mutate_one(path.split("/")[3], lambda t: op_update(t, payload))
         return self._send_json({"error": "not found"}, 404)
 
     def do_DELETE(self):

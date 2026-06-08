@@ -90,6 +90,40 @@ and web push (see [DESIGN.md](DESIGN.md)).
 **Data location override** — both the desktop app and the web server honor the
 `TINYTASKLIST_DATA_DIR` env var (sync folder / separate DB / tests).
 
+**Web parity (round 4)** — closed the big gaps vs. the desktop:
+- **Edit a task** on the web (click a row, or right-click for a context menu with
+  Edit / Mark done / Suspend / Delete) via a new `PATCH /api/tasks/{id}`.
+- **Suspended tasks are now hidden** from active/today/all (matching the desktop) —
+  fixes the "AI deep learning / NCF ghosts." Added a **Suspended** view to manage them.
+- **Undo** after a tap (toast with Undo for done / suspend / delete; restores a
+  pre-action snapshot, so even a recurring "done" that advanced the date is reverted).
+- **Completed** view is ordered by most-recently-completed.
+- Desktop gained **View → Open Web App** (starts the local server if needed).
+- **Robustness:** `_load_json` now tolerates a UTF-8 BOM, so a `tasks_gui.json`
+  saved by Notepad/PowerShell no longer crashes either front-end. (Regression test added.)
+- Fixed a JS syntax error that had broken the whole front-end (also `node --check`
+  guard) and made dark mode follow the OS theme.
+
+> **Known caveat:** editing in the desktop and web at the same time can clobber
+> (last-writer-wins) — see ARCHITECTURE.md. The SQLite migration (below) is the fix.
+
+## Next up (prioritized)
+
+1. **SQLite single source of truth** (DESIGN.md Phase 1). Move persistence behind
+   `model.py` to SQLite so the desktop and web can't clobber each other, with proper
+   atomic writes. Highest priority — it's both a correctness fix (the concurrency
+   caveat) and the foundation for the hosted/phone version.
+2. **Auth layer** scaffolding (DESIGN.md Phase 3) before anything is reachable
+   off-machine.
+3. **Smart / fewer groups.** With ~20 groups the list is noisy. Ideas: collapse
+   rarely-used groups, group-of-groups (sections), or **auto-grouping related tasks
+   by context** (e.g. supplements taken together, a "morning routine"). Possibly
+   offer a few **designed templates** (Supplements, Meals, Morning) instead of
+   free-form groups.
+4. **Clearer recurring instances.** A task that recurs as just "meal" reads
+   ambiguously; consider per-occurrence labels (Breakfast/Lunch/Dinner) or a
+   title pattern so the day's instance is self-explanatory.
+
 ## Open items (intentionally not changed — behavior decisions)
 
 1. **Time filter hides date-less tasks.** With Time ≠ `any`, tasks with no due date

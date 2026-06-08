@@ -5,12 +5,22 @@ the "professional, website-style" direction discussed in
 [../docs/DESIGN.md](../docs/DESIGN.md).
 
 ## What it is
-- Pure HTML/CSS/JS. No build step, no server, no dependencies.
-- Uses **sample data only** (`sample-data.js`) — none of your real tasks.
-- Demonstrates the target look & feel: sidebar navigation (Today / Upcoming /
-  Habits / All / Completed + groups), stat cards, a calm task list with priority
-  left-bars and chips, a habit **streak heatmap**, light/dark themes (remembered),
-  an Add-task modal, search, and a responsive layout that collapses on mobile.
+- Pure HTML/CSS/JS. No build step, no dependencies.
+- In **sample mode** uses `sample-data.js`; in **live mode** (served by the local
+  server) it reads/writes your real tasks.
+- Sidebar navigation (Today / Upcoming / Habits / All / Completed / Suspended +
+  groups), stat cards, a calm task list with priority left-bars and chips, a habit
+  **streak heatmap**, light/dark themes (follows your OS, remembered), search, and a
+  responsive layout that collapses on mobile.
+
+## Interacting with tasks
+- **Add:** the "+ Add task" button.
+- **Edit:** click a task row, or **right-click** it (or the ⋯ button) for a menu
+  with Edit / Mark done / Suspend / Delete.
+- **Complete:** click the circle. A toast appears with **Undo** (works even for
+  recurring tasks, which advance their date when completed).
+- **Suspended** tasks are hidden from the active views and live under the Suspended
+  view — matching the desktop app.
 
 ## Two ways to run it
 

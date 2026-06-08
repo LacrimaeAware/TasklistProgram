@@ -35,6 +35,25 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(s["ui_category_scope"], "done")
 
 
+class LoadDbTests(unittest.TestCase):
+    def test_load_db_tolerates_utf8_bom(self):
+        import json, tempfile
+        from pathlib import Path
+        tmp = Path(tempfile.mkdtemp())
+        f = tmp / "tasks_gui.json"
+        # Write WITH a UTF-8 BOM, as Notepad / PowerShell Out-File would.
+        f.write_text(json.dumps({"version": 1, "tasks": [], "next_id": 1}), encoding="utf-8-sig")
+        orig = (model.DATA_FILE, model.BACKUP_FILE, model.LEGACY_DATA_FILE)
+        try:
+            model.DATA_FILE = f
+            model.BACKUP_FILE = tmp / "tasks_gui.json.bak"
+            model.LEGACY_DATA_FILE = tmp / "nope.json"
+            db = model.load_db()
+            self.assertEqual(db["next_id"], 1)
+        finally:
+            model.DATA_FILE, model.BACKUP_FILE, model.LEGACY_DATA_FILE = orig
+
+
 class TaskHelperTests(unittest.TestCase):
     def test_get_task(self):
         db = {"tasks": [{"id": 1}, {"id": 2}]}

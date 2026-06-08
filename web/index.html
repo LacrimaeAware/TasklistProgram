@@ -60,7 +60,7 @@
   <!-- Add-task modal -->
   <div class="overlay" id="overlay">
     <div class="modal">
-      <h3>Add a task</h3>
+      <h3 id="m_modalTitle">Add a task</h3>
       <div class="field">
         <label>Title</label>
         <input id="m_title" type="text" placeholder="e.g. Finish lab report" />
@@ -73,6 +73,7 @@
         <div class="field">
           <label>Priority</label>
           <select id="m_prio">
+            <option value="U">Ultra</option>
             <option value="H">High</option>
             <option value="M" selected>Medium</option>
             <option value="L">Low</option>
@@ -97,6 +98,10 @@
           <label>Group</label>
           <input id="m_group" type="text" placeholder="e.g. School" />
         </div>
+      </div>
+      <div class="field">
+        <label>Notes</label>
+        <textarea id="m_notes" rows="3" placeholder="Optional details…"></textarea>
       </div>
       <div class="modal-actions">
         <button class="btn" id="m_cancel">Cancel</button>

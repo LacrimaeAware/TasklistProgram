@@ -16,7 +16,9 @@ LEGACY_DATA_FILE = ROOT_DIR / "tasks_gui.json"
 LEGACY_BACKUP_FILE = ROOT_DIR / "tasks_gui.json.bak"
 
 def _load_json(path: Path):
-    with path.open("r", encoding="utf-8") as f:
+    # utf-8-sig tolerates a UTF-8 BOM (e.g. if the file was saved by Notepad or
+    # PowerShell) while still reading plain UTF-8 correctly.
+    with path.open("r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 def _atomic_write_json(path: Path, payload: dict):

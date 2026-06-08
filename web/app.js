@@ -14,7 +14,10 @@ const PRIO_RANK = { U: 5, H: 4, M: 3, L: 2, D: 1, X: 0 };
 let tasks = SAMPLE_TASKS.slice();
 let state = { view: "today", group: null, search: "" };
 let nextId = Math.max(...tasks.map((t) => t.id)) + 1;
-let LIVE = false; // true when connected to the local API (webserver.py)
+let LIVE = false;          // connected to the local API (webserver.py)
+let editingId = null;      // task id being edited in the modal, or null for add
+let _ctxMenu = null;
+let _toastTimer = null;
 
 /* ---------- API ---------- */
 async function api(method, url, body) {
@@ -34,20 +37,11 @@ async function loadData() {
     LIVE = false;
   }
 }
-async function toggleDone(t) {
-  if (LIVE) {
-    try {
-      const updated = await api("POST", `/api/tasks/${t.id}/toggle`);
-      Object.assign(t, updated);
-    } catch (e) { /* fall back to local */ t.done = !t.done; }
-  } else {
-    t.done = !t.done;
-  }
-  render();
-}
 
 /* ---------- date helpers ---------- */
 function startOfToday() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
+function isoDate(d) { const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 function parseDue(s) {
   if (!s) return null;
   const [y, m, d] = s.slice(0, 10).split("-").map(Number);
@@ -64,16 +58,17 @@ function dueChip(due) {
   return { text: due.toLocaleDateString(undefined, { month: "short", day: "numeric" }) };
 }
 
-/* ---------- filtering ---------- */
-function activeTasks() { return tasks.filter((t) => !t.done); }
+/* ---------- filtering (suspended-aware, mirrors the desktop) ---------- */
+function activeTasks() { return tasks.filter((t) => !t.done && !t.suspended); }
 
 function viewTasks() {
-  const today = startOfToday();
   let list;
   if (state.view === "done") {
-    list = tasks.filter((t) => t.done);
+    list = tasks.filter((t) => t.done && !t.suspended);
+  } else if (state.view === "suspended") {
+    list = tasks.filter((t) => t.suspended && !t.done);
   } else if (state.view === "habits") {
-    list = tasks.filter((t) => t.repeat && t.repeat !== "none");
+    list = tasks.filter((t) => t.repeat && t.repeat !== "none" && !t.suspended);
   } else if (state.view === "upcoming") {
     list = activeTasks().filter((t) => { const d = parseDue(t.due); return d && dayDiff(d) > 0; });
   } else if (state.view === "today") {
@@ -105,15 +100,16 @@ const VIEWS = [
   { id: "habits", icon: "🔁", label: "Habits" },
   { id: "all", icon: "📋", label: "All tasks" },
   { id: "done", icon: "✓", label: "Completed" },
+  { id: "suspended", icon: "⏸", label: "Suspended" },
 ];
 
 function viewCount(id) {
-  const today = startOfToday();
   if (id === "today") return activeTasks().filter((t) => { const d = parseDue(t.due); return d && dayDiff(d) <= 0; }).length;
   if (id === "upcoming") return activeTasks().filter((t) => { const d = parseDue(t.due); return d && dayDiff(d) > 0; }).length;
-  if (id === "habits") return tasks.filter((t) => t.repeat && t.repeat !== "none").length;
+  if (id === "habits") return tasks.filter((t) => t.repeat && t.repeat !== "none" && !t.suspended).length;
   if (id === "all") return activeTasks().length;
-  if (id === "done") return tasks.filter((t) => t.done).length;
+  if (id === "done") return tasks.filter((t) => t.done && !t.suspended).length;
+  if (id === "suspended") return tasks.filter((t) => t.suspended && !t.done).length;
   return 0;
 }
 
@@ -135,7 +131,7 @@ function renderSidebar() {
   Object.keys(groups).sort().forEach((name) => {
     const el = document.createElement("div");
     el.className = "nav-item" + (state.group === name ? " active" : "");
-    el.innerHTML = `<span class="ico">#</span><span class="label">${name}</span><span class="count">${groups[name]}</span>`;
+    el.innerHTML = `<span class="ico">#</span><span class="label">${escapeHtml(name)}</span><span class="count">${groups[name]}</span>`;
     el.onclick = () => { state.group = name; state.view = "all"; render(); closeSidebar(); };
     g.appendChild(el);
   });
@@ -147,13 +143,13 @@ function taskRow(t) {
   const chip = dueChip(due);
   const p = PRIO[t.priority] || PRIO.M;
   const el = document.createElement("div");
-  el.className = "task" + (t.done ? " done" : "");
+  el.className = "task" + (t.done ? " done" : "") + (t.suspended ? " suspended" : "");
   el.style.setProperty("--bar", `var(--p-${t.priority})`);
 
   const meta = [];
-  if (t.group) meta.push(`<span class="chip group">${t.group}</span>`);
+  if (t.group) meta.push(`<span class="chip group">${escapeHtml(t.group)}</span>`);
   if (chip) meta.push(`<span class="chip due${chip.overdue ? " overdue" : ""}">${chip.overdue ? "⚠ " : ""}${chip.text}</span>`);
-  if (t.repeat && t.repeat !== "none") meta.push(`<span class="chip repeat">🔁 ${t.repeat}</span>`);
+  if (t.repeat && t.repeat !== "none") meta.push(`<span class="chip repeat">🔁 ${escapeHtml(t.repeat)}</span>`);
   if (t.times) meta.push(`<span class="chip">✓ ${t.times}×</span>`);
 
   el.innerHTML = `
@@ -163,40 +159,106 @@ function taskRow(t) {
       ${t.notes ? `<div class="notes">${escapeHtml(t.notes)}</div>` : ""}
       <div class="meta">${meta.join("")}</div>
     </div>
+    <button class="row-menu" title="Actions">⋯</button>
     <span class="prio-tag" style="background: var(--p-${t.priority})">${p.icon} ${p.label}</span>
   `;
-  el.querySelector(".check").onclick = () => toggleDone(t);
+  el.querySelector(".check").onclick = (e) => { e.stopPropagation(); toggleDone(t); };
+  el.querySelector(".body").onclick = () => openModal(t);          // click to edit
+  el.querySelector(".row-menu").onclick = (e) => { e.stopPropagation(); const r = e.target.getBoundingClientRect(); showContextMenu(r.left, r.bottom + 4, t); };
+  el.oncontextmenu = (e) => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, t); };  // right-click, like the desktop
   return el;
+}
+
+/* ---------- context menu (right-click / ⋯) ---------- */
+function showContextMenu(x, y, t) {
+  closeContextMenu();
+  const m = document.createElement("div");
+  m.className = "context-menu";
+  const add = (label, fn, cls) => {
+    const it = document.createElement("div");
+    it.className = "item" + (cls ? " " + cls : "");
+    it.textContent = label;
+    it.onclick = () => { closeContextMenu(); fn(); };
+    m.appendChild(it);
+  };
+  const sep = () => { const s = document.createElement("div"); s.className = "sep"; m.appendChild(s); };
+  add("✎  Edit", () => openModal(t));
+  add(t.done ? "↩  Mark not done" : "✓  Mark done", () => toggleDone(t));
+  add(t.suspended ? "▶  Unsuspend" : "⏸  Suspend", () => setSuspended(t, !t.suspended));
+  sep();
+  add("🗑  Delete", () => deleteTask(t), "danger");
+  document.body.appendChild(m);
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.min(x, window.innerWidth - r.width - 8) + "px";
+  m.style.top = Math.min(y, window.innerHeight - r.height - 8) + "px";
+  _ctxMenu = m;
+}
+function closeContextMenu() { if (_ctxMenu) { _ctxMenu.remove(); _ctxMenu = null; } }
+
+/* ---------- mutations ---------- */
+async function toggleDone(t) {
+  const snap = { ...t };
+  if (LIVE) {
+    try { Object.assign(t, await api("POST", `/api/tasks/${t.id}/toggle`)); }
+    catch (e) { t.done = !t.done; }
+  } else { t.done = !t.done; }
+  render();
+  showToast(snap.done ? "Marked not done" : "Marked done", "Undo", () => undoToggle(snap));
+}
+async function undoToggle(snap) {
+  if (LIVE) {
+    try {
+      await api("PATCH", `/api/tasks/${snap.id}`, {
+        due: snap.due, completed_at: snap.completed_at || "", times: snap.times, history: snap.history || [],
+        is_suspended: !!snap.suspended,
+      });
+      await loadData();
+    } catch (e) {}
+  } else {
+    const t = tasks.find((x) => x.id === snap.id);
+    if (t) Object.assign(t, snap);
+  }
+  render();
+}
+async function setSuspended(t, val) {
+  if (LIVE) {
+    try { Object.assign(t, await api("PATCH", `/api/tasks/${t.id}`, { is_suspended: val })); } catch (e) {}
+  } else { t.suspended = val; }
+  render();
+  showToast(val ? "Suspended" : "Unsuspended", "Undo", () => setSuspended(t, !val));
+}
+async function deleteTask(t) {
+  const snap = { ...t };
+  if (LIVE) { try { await api("DELETE", `/api/tasks/${t.id}`); } catch (e) {} }
+  tasks = tasks.filter((x) => x.id !== t.id);
+  render();
+  showToast("Deleted", "Undo", async () => {
+    if (LIVE) { try { await api("PATCH", `/api/tasks/${snap.id}`, { is_deleted: false }); await loadData(); } catch (e) {} }
+    else { tasks.push(snap); }
+    render();
+  });
 }
 
 /* ---------- habit heatmap ---------- */
 function heatmapData(days) {
-  // Deterministic-ish pattern with a current streak, just for the demo.
   const cells = [];
   let seed = 7;
   const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
   for (let i = days - 1; i >= 0; i--) {
-    let level;
-    if (i < 5) level = 3;                    // a clean current streak
-    else level = rand() < 0.74 ? (1 + Math.floor(rand() * 3)) : 0;
-    cells.push(level);
+    cells.push(i < 5 ? 3 : (rand() < 0.74 ? (1 + Math.floor(rand() * 3)) : 0));
   }
   let streak = 0;
   for (let i = cells.length - 1; i >= 0 && cells[i] > 0; i--) streak++;
   return { cells, streak };
 }
-
-function isoDate(d) { const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
-function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 function streakFromSet(set) {
   const today = startOfToday();
-  let i = set.has(isoDate(today)) ? 0 : 1; // today may not be done yet
+  let i = set.has(isoDate(today)) ? 0 : 1;
   let s = 0;
   for (; ; i++) { if (set.has(isoDate(addDays(today, -i)))) s++; else break; }
   return s;
 }
 function habitInfo() {
-  // Use real completion history when available; otherwise the demo pattern.
   const recurring = tasks.filter((t) => t.repeat && t.repeat !== "none" && Array.isArray(t.history) && t.history.length);
   if (!recurring.length) { const d = heatmapData(91); return { title: "Take vitamins", cells: d.cells, streak: d.streak }; }
   recurring.sort((a, b) => b.history.length - a.history.length);
@@ -253,10 +315,10 @@ function renderStats(content) {
 /* ---------- main render ---------- */
 function render() {
   renderSidebar();
-  const titleMap = { today: "Today", upcoming: "Upcoming", habits: "Habits", all: "All tasks", done: "Completed" };
+  const titleMap = { today: "Today", upcoming: "Upcoming", habits: "Habits", all: "All tasks", done: "Completed", suspended: "Suspended" };
   document.getElementById("viewTitle").textContent = state.group || titleMap[state.view];
   const niceDate = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
-  document.getElementById("viewSub").textContent = state.view === "today" ? niceDate : "";
+  document.getElementById("viewSub").textContent = state.view === "today" && !state.group ? niceDate : "";
 
   const content = document.getElementById("content");
   content.innerHTML = "";
@@ -271,86 +333,120 @@ function render() {
 
   if (state.view === "habits" && !state.group) { renderHabits(content); return; }
 
-  const list = sortTasks(viewTasks());
+  // Completed view: most-recently-completed first.
+  let list;
+  if (state.view === "done") {
+    list = viewTasks().sort((a, b) => String(b.completed_at || "").localeCompare(String(a.completed_at || "")));
+  } else {
+    list = sortTasks(viewTasks());
+  }
+
   if (!list.length) {
-    content.insertAdjacentHTML("beforeend",
-      `<div class="empty"><div class="big">🎉</div><div>Nothing here. Enjoy the moment.</div></div>`);
+    const msg = state.view === "today" ? "Nothing due today. Nice." : "Nothing here.";
+    content.insertAdjacentHTML("beforeend", `<div class="empty"><div class="big">🎉</div><div>${msg}</div></div>`);
     return;
   }
   list.forEach((t) => content.appendChild(taskRow(t)));
 }
 
-/* ---------- interactions ---------- */
-function escapeHtml(s) { return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+/* ---------- toast ---------- */
+function showToast(msg, actionLabel, actionFn) {
+  let el = document.getElementById("toast");
+  if (!el) { el = document.createElement("div"); el.id = "toast"; el.className = "toast"; document.body.appendChild(el); }
+  el.innerHTML = "";
+  const span = document.createElement("span"); span.textContent = msg; el.appendChild(span);
+  if (actionLabel && actionFn) {
+    const b = document.createElement("button"); b.textContent = actionLabel;
+    b.onclick = () => { hideToast(); actionFn(); };
+    el.appendChild(b);
+  }
+  el.classList.add("show");
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(hideToast, 5000);
+}
+function hideToast() { const el = document.getElementById("toast"); if (el) el.classList.remove("show"); }
 
+/* ---------- modal (add + edit) ---------- */
+function val(id) { return document.getElementById(id).value; }
+function setVal(id, v) { document.getElementById(id).value = v; }
+
+function openModal(task) {
+  editingId = task ? task.id : null;
+  document.getElementById("m_modalTitle").textContent = task ? "Edit task" : "Add a task";
+  document.getElementById("m_save").textContent = task ? "Save" : "Add task";
+  setVal("m_title", task ? task.title : "");
+  setVal("m_due", task ? (task.due || "") : "");
+  setVal("m_prio", task ? task.priority : "M");
+  setVal("m_repeat", task ? (task.repeat || "none") : "none");
+  setVal("m_group", task ? (task.group || "") : "");
+  setVal("m_notes", task ? (task.notes || "") : "");
+  document.getElementById("overlay").classList.add("open");
+  document.getElementById("m_title").focus();
+}
+function closeModal() { document.getElementById("overlay").classList.remove("open"); }
+
+async function saveModal() {
+  const title = val("m_title").trim();
+  if (!title) return;
+  const payload = {
+    title, due: val("m_due").trim(), priority: val("m_prio"),
+    repeat: val("m_repeat"), group: val("m_group").trim(), notes: val("m_notes"),
+  };
+  if (editingId != null) {
+    if (LIVE) {
+      try {
+        const u = await api("PATCH", `/api/tasks/${editingId}`, payload);
+        const i = tasks.findIndex((t) => t.id === editingId);
+        if (i >= 0) tasks[i] = u;
+      } catch (e) {}
+    } else {
+      const t = tasks.find((x) => x.id === editingId);
+      if (t) { t.title = title; t.due = parseQuickDue(payload.due); t.priority = payload.priority; t.repeat = payload.repeat; t.group = payload.group; t.notes = payload.notes; }
+    }
+  } else {
+    if (LIVE) {
+      try { tasks.push(await api("POST", "/api/tasks", payload)); } catch (e) {}
+    } else {
+      tasks.push({ id: nextId++, title, due: parseQuickDue(payload.due), priority: payload.priority, repeat: payload.repeat, group: payload.group, notes: payload.notes, done: false, times: 0 });
+    }
+  }
+  closeModal();
+  render();
+}
+
+/* ---------- misc helpers ---------- */
+function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 function setTheme(mode, persist) {
   document.documentElement.setAttribute("data-theme", mode);
   document.getElementById("themeBtn").textContent = mode === "dark" ? "☀️" : "🌙";
   if (persist) { try { localStorage.setItem("tt_theme", mode); } catch (e) {} }
 }
-function currentTheme() {
-  return document.documentElement.getAttribute("data-theme") || "light";
-}
+function currentTheme() { return document.documentElement.getAttribute("data-theme") || "light"; }
 function closeSidebar() { document.getElementById("sidebar").classList.remove("open"); }
-
 function parseQuickDue(s) {
   s = (s || "").trim().toLowerCase();
   if (!s) return "";
-  if (s === "today") return _due(0);
-  if (s === "tomorrow") return _due(1);
+  if (s === "today") return isoDate(startOfToday());
+  if (s === "tomorrow") return isoDate(addDays(startOfToday(), 1));
   const m = s.match(/^\+(\d+)d$/);
-  if (m) return _due(parseInt(m[1], 10));
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  return _due(0);
+  if (m) return isoDate(addDays(startOfToday(), parseInt(m[1], 10)));
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s;
+  return isoDate(startOfToday());
 }
 
-function setupModal() {
-  const overlay = document.getElementById("overlay");
-  const open = () => { overlay.classList.add("open"); document.getElementById("m_title").focus(); };
-  const close = () => overlay.classList.remove("open");
-  document.getElementById("addBtn").onclick = open;
-  document.getElementById("m_cancel").onclick = close;
-  overlay.onclick = (e) => { if (e.target === overlay) close(); };
-  document.getElementById("m_save").onclick = async () => {
-    const title = document.getElementById("m_title").value.trim();
-    if (!title) return;
-    const payload = {
-      title,
-      due: document.getElementById("m_due").value.trim(),
-      priority: document.getElementById("m_prio").value,
-      repeat: document.getElementById("m_repeat").value,
-      group: document.getElementById("m_group").value.trim(),
-    };
-    if (LIVE) {
-      try {
-        const created = await api("POST", "/api/tasks", payload);
-        tasks.push(created);
-      } catch (e) { /* ignore */ }
-    } else {
-      tasks.push({
-        id: nextId++, title,
-        due: parseQuickDue(payload.due),
-        priority: payload.priority, repeat: payload.repeat, group: payload.group,
-        notes: "", done: false, times: 0,
-      });
-    }
-    document.getElementById("m_title").value = "";
-    document.getElementById("m_due").value = "";
-    document.getElementById("m_group").value = "";
-    close();
-    render();
-  };
-}
-
+/* ---------- init ---------- */
 async function init() {
-  // The inline <head> script already set data-theme (saved choice or system).
-  // Just sync the button icon, and persist only when the user explicitly toggles.
-  setTheme(currentTheme(), false);
-  document.getElementById("themeBtn").onclick = () =>
-    setTheme(currentTheme() === "dark" ? "light" : "dark", true);
+  setTheme(currentTheme(), false); // inline <head> script already chose saved/system
+  document.getElementById("themeBtn").onclick = () => setTheme(currentTheme() === "dark" ? "light" : "dark", true);
   document.getElementById("search").oninput = (e) => { state.search = e.target.value; render(); };
   document.getElementById("menuBtn").onclick = () => document.getElementById("sidebar").classList.toggle("open");
-  setupModal();
+  document.getElementById("addBtn").onclick = () => openModal(null);
+  document.getElementById("m_cancel").onclick = closeModal;
+  document.getElementById("m_save").onclick = saveModal;
+  const overlay = document.getElementById("overlay");
+  overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+  document.addEventListener("click", closeContextMenu);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeContextMenu(); closeModal(); } });
   await loadData();
   render();
 }

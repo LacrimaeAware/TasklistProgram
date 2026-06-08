@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "web-prototype",
+      "name": "web-app",
       "runtimeExecutable": "py",
       "runtimeArgs": ["-3", "-m", "tasklistprogram.webserver", "8000"],
       "port": 8000

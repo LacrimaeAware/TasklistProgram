@@ -247,8 +247,15 @@ body {
 .check:hover { border-color: var(--accent); }
 .task.done .check { background: var(--green); border-color: var(--green); }
 
-.task .body { flex: 1; min-width: 0; }
+.task .body { flex: 1; min-width: 0; cursor: pointer; }
 .task .title { font-weight: 600; font-size: 14px; }
+.row-menu {
+  border: none; background: transparent; color: var(--text-faint);
+  font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 6px;
+  border-radius: 6px; opacity: 0; align-self: center; flex-shrink: 0;
+}
+.task:hover .row-menu { opacity: 1; }
+.row-menu:hover { background: var(--surface-2); color: var(--text); }
 .task .notes { color: var(--text-muted); font-size: 12.5px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 
@@ -316,12 +323,13 @@ body {
 .modal h3 { margin-bottom: 14px; font-size: 17px; }
 .field { margin-bottom: 12px; }
 .field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; }
-.field input, .field select {
+.field input, .field select, .field textarea {
   width: 100%; padding: 9px 11px;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: var(--bg); color: var(--text); font-size: 13px; outline: none;
+  font-family: inherit; resize: vertical;
 }
-.field input:focus, .field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
+.field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 
@@ -335,6 +343,48 @@ body {
   margin-bottom: 18px;
   display: flex; gap: 8px; align-items: center;
 }
+
+/* ---------- Context menu ---------- */
+.context-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 170px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 5px;
+}
+.context-menu .item {
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex; align-items: center; gap: 9px;
+}
+.context-menu .item:hover { background: var(--surface-2); }
+.context-menu .item.danger { color: var(--p-U); }
+.context-menu .sep { height: 1px; background: var(--border); margin: 4px 2px; }
+
+/* ---------- Toast / snackbar ---------- */
+.toast {
+  position: fixed;
+  bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px);
+  background: #23262e; color: #fff;
+  border-radius: 10px; padding: 11px 16px;
+  box-shadow: var(--shadow-md);
+  display: flex; align-items: center; gap: 16px;
+  font-size: 13.5px; font-weight: 500;
+  opacity: 0; pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease;
+  z-index: 70;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+.toast button {
+  background: none; border: none; color: #8ea2ff; font-weight: 700;
+  cursor: pointer; font-size: 13.5px; padding: 2px 4px;
+}
+.toast button:hover { text-decoration: underline; }
 
 /* ---------- Responsive ---------- */
 .menu-btn { display: none; }
