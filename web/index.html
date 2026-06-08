@@ -5,8 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#5b6cf0" />
   <title>Tiny Tasklist</title>
+  <meta name="color-scheme" content="light dark" />
   <link rel="icon" type="image/png" href="assets/icon.png" />
   <link rel="apple-touch-icon" href="assets/icon.png" />
+  <!-- Set theme before first paint (no flash): saved choice, else system preference. -->
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("tt_theme");
+        var sysDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.setAttribute("data-theme", saved || (sysDark ? "dark" : "light"));
+      } catch (e) {}
+    })();
+  </script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>

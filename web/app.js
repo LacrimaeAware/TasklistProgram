@@ -225,10 +225,10 @@ function renderHabits(content) {
     </div>`;
   content.appendChild(card);
 
-  const title = document.createElement("div");
-  title.className = "section-title";
-  title.textContent = "All recurring tasks";
-  content.appendChild(title);
+  const heading = document.createElement("div");
+  heading.className = "section-title";
+  heading.textContent = "All recurring tasks";
+  content.appendChild(heading);
   sortTasks(viewTasks()).forEach((t) => content.appendChild(taskRow(t)));
 }
 
@@ -283,10 +283,13 @@ function render() {
 /* ---------- interactions ---------- */
 function escapeHtml(s) { return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
-function setTheme(mode) {
+function setTheme(mode, persist) {
   document.documentElement.setAttribute("data-theme", mode);
   document.getElementById("themeBtn").textContent = mode === "dark" ? "☀️" : "🌙";
-  try { localStorage.setItem("tt_theme", mode); } catch (e) {}
+  if (persist) { try { localStorage.setItem("tt_theme", mode); } catch (e) {} }
+}
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") || "light";
 }
 function closeSidebar() { document.getElementById("sidebar").classList.remove("open"); }
 
@@ -340,11 +343,11 @@ function setupModal() {
 }
 
 async function init() {
-  let saved = "light";
-  try { saved = localStorage.getItem("tt_theme") || "light"; } catch (e) {}
-  setTheme(saved);
+  // The inline <head> script already set data-theme (saved choice or system).
+  // Just sync the button icon, and persist only when the user explicitly toggles.
+  setTheme(currentTheme(), false);
   document.getElementById("themeBtn").onclick = () =>
-    setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
+    setTheme(currentTheme() === "dark" ? "light" : "dark", true);
   document.getElementById("search").oninput = (e) => { state.search = e.target.value; render(); };
   document.getElementById("menuBtn").onclick = () => document.getElementById("sidebar").classList.toggle("open");
   setupModal();

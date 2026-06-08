@@ -4,7 +4,7 @@
     {
       "name": "web-prototype",
       "runtimeExecutable": "py",
-      "runtimeArgs": ["-3", "-m", "http.server", "8000", "--directory", "web"],
+      "runtimeArgs": ["-3", "-m", "tasklistprogram.webserver", "8000"],
       "port": 8000
     }
   ]
