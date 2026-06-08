@@ -156,11 +156,14 @@ The tests cover the pure-logic modules (`dates`, `filters`, `scheduler`,
 
 ## Documentation
 
+See [`CLAUDE.md`](CLAUDE.md) for a one-page project profile, and
+[`docs/`](docs/README.md) for everything:
+
 - [User Guide](docs/USER_GUIDE.md) — every feature explained.
-- [Architecture](docs/ARCHITECTURE.md) — module map, data flow, file formats.
-- [Design](docs/DESIGN.md) — design principles, UI direction, and the plan for a
-  web/mobile version.
-- [Roadmap & Known Issues](docs/ROADMAP.md) — bugs, cleanups, and ideas going forward.
+- [Architecture](docs/ARCHITECTURE.md) — module map, data flow, file formats, web server.
+- [Features & parity](docs/FEATURES.md) — desktop ↔ web feature matrix.
+- [Design](docs/DESIGN.md) — UI direction and the web/mobile + privacy plan.
+- [Roadmap](docs/ROADMAP.md) · [Ideas](docs/IDEAS.md) · [Bugs](docs/BUGS.md) · [Changelog](docs/CHANGELOG.md)
 
 ## Web prototype
 

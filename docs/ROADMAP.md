@@ -125,6 +125,13 @@ and web push (see [DESIGN.md](DESIGN.md)).
 - Hardened: `_load_json` tolerates a UTF-8 BOM (regression test); added op_update /
   op_reset_hazard / client_tasks tests (110 total).
 
+**Data safety + docs (2026-06-08)**
+- **Automatic daily backups:** `save_db` writes a dated snapshot to
+  `data/backups/` (14-day rotation) alongside the `.bak`. Cheap; never breaks a save.
+- **Documentation system:** added `CLAUDE.md` (project profile), `docs/FEATURES.md`
+  (parity matrix), `docs/CHANGELOG.md`, `docs/IDEAS.md`, `docs/BUGS.md`, and a
+  `docs/README.md` index. Ideas now live in IDEAS.md; this file is the active plan.
+
 ## Next up (prioritized)
 
 1. **SQLite single source of truth** (DESIGN.md Phase 1). Move persistence behind

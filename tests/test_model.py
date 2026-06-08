@@ -54,6 +54,31 @@ class LoadDbTests(unittest.TestCase):
             model.DATA_FILE, model.BACKUP_FILE, model.LEGACY_DATA_FILE = orig
 
 
+class BackupTests(unittest.TestCase):
+    def test_save_creates_daily_backup_and_prunes(self):
+        import tempfile
+        from pathlib import Path
+        tmp = Path(tempfile.mkdtemp())
+        orig = (model.DATA_DIR, model.DATA_FILE, model.BACKUP_FILE, model.BACKUP_DIR)
+        try:
+            model.DATA_DIR = tmp
+            model.DATA_FILE = tmp / "tasks_gui.json"
+            model.BACKUP_FILE = tmp / "tasks_gui.json.bak"
+            model.BACKUP_DIR = tmp / "backups"
+            model.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            # Pre-seed more than the keep limit of old dated backups.
+            for i in range(model.DAILY_BACKUPS_KEEP + 5):
+                (model.BACKUP_DIR / f"tasks_gui_2020-01-{i+1:02d}.json").write_text("{}", encoding="utf-8")
+            model.save_db({"version": 1, "tasks": [], "next_id": 1})
+            snaps = sorted(model.BACKUP_DIR.glob("tasks_gui_*.json"))
+            self.assertLessEqual(len(snaps), model.DAILY_BACKUPS_KEEP)
+            # Today's snapshot exists.
+            from datetime import date
+            self.assertTrue((model.BACKUP_DIR / f"tasks_gui_{date.today().isoformat()}.json").exists())
+        finally:
+            model.DATA_DIR, model.DATA_FILE, model.BACKUP_FILE, model.BACKUP_DIR = orig
+
+
 class TaskHelperTests(unittest.TestCase):
     def test_get_task(self):
         db = {"tasks": [{"id": 1}, {"id": 2}]}

@@ -12,6 +12,8 @@ _ENV_DATA_DIR = os.environ.get("TINYTASKLIST_DATA_DIR")
 DATA_DIR = Path(_ENV_DATA_DIR) if _ENV_DATA_DIR else (ROOT_DIR / "data")
 DATA_FILE = DATA_DIR / "tasks_gui.json"
 BACKUP_FILE = DATA_DIR / "tasks_gui.json.bak"
+BACKUP_DIR = DATA_DIR / "backups"
+DAILY_BACKUPS_KEEP = 14  # ~2 weeks of point-in-time recovery; cheap (one write/day)
 LEGACY_DATA_FILE = ROOT_DIR / "tasks_gui.json"
 LEGACY_BACKUP_FILE = ROOT_DIR / "tasks_gui.json.bak"
 
@@ -86,6 +88,26 @@ def load_db():
     db["settings"] = normalize_settings(db.get("settings", {}))
     return db
 
+def _rotate_daily_backup(payload: dict):
+    """Keep one dated snapshot per day under data/backups/, pruned to the last N.
+
+    Cheap insurance against corruption / bad edits: at most one extra write per day,
+    capped at DAILY_BACKUPS_KEEP files. Never allowed to break a save.
+    """
+    try:
+        daily = BACKUP_DIR / f"tasks_gui_{date.today().isoformat()}.json"
+        if daily.exists():
+            return
+        _atomic_write_json(daily, payload)
+        snaps = sorted(BACKUP_DIR.glob("tasks_gui_*.json"))
+        for old in snaps[:-DAILY_BACKUPS_KEEP]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+    except Exception:
+        pass
+
 def save_db(db):
     if DATA_FILE.exists():
         try:
@@ -93,6 +115,7 @@ def save_db(db):
         except json.JSONDecodeError:
             pass
     _atomic_write_json(DATA_FILE, db)
+    _rotate_daily_backup(db)
 
 def get_task(db, tid: int):
     for t in db["tasks"]:
