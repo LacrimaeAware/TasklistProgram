@@ -135,6 +135,26 @@
     </div>
   </div>
 
+  <!-- Import-tasks modal -->
+  <div class="overlay" id="importOverlay">
+    <div class="modal">
+      <h3>Import tasks</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px">
+        One task per line. Optional fields after the title, separated by <code>|</code>:<br>
+        <code>Title | due: 10/13 14:00 | prio: H/M/L/D/Misc | repeat: daily/weekly/… | group: Name | notes: …</code>
+      </p>
+      <div class="field">
+        <textarea id="imp_text" rows="10" placeholder="Buy groceries
+Gym | repeat: weekly | prio: M | group: Health
+Pay rent | due: +5d | prio: H | group: Life Admin"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="imp_cancel">Cancel</button>
+        <button class="btn primary" id="imp_go">Import</button>
+      </div>
+    </div>
+  </div>
+
   <script src="sample-data.js"></script>
   <script src="app.js"></script>
 </body>

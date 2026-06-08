@@ -62,7 +62,7 @@ front-ends. Keep this updated when features land. Legend: ✅ full · ⚠️ par
 | Per-task Markdown document (public + private notes) | ✅ | ❌ | Web edits the `notes` field but can't open the doc / private section. |
 | Daily journal (add entry, open, auto-log completions) | ✅ | ❌ | Not on web. |
 | Mantras (show/add/open, daily auto-show) | ✅ | ❌ | Not on web. |
-| Import (.txt file / paste) | ✅ | ❌ | Not on web. |
+| Import (.txt file / paste) | ✅ | ⚠️ | Web has **paste** import (⚙ → Import tasks…); file upload not yet. |
 | Help / Guide dialog | ✅ | ❌ | Web has inline hints only. |
 | Open data folder | ✅ | n/a | Desktop: File menu. |
 
@@ -82,9 +82,8 @@ front-ends. Keep this updated when features land. Legend: ✅ full · ⚠️ par
 1. **Reminders** (checkpoints + chip + list)
 2. **Per-task document + private notes** access
 3. **Journal** and **Mantras**
-4. **Import** (paste/file)
-5. **Custom repeat** in the editor, **custom date** filter
-6. **Bulk actions** + **bump**
-7. **Column-header sorting**, **Settings** dialog, **autocomplete**
+4. **Custom repeat** in the editor, **custom date** filter
+5. **Bulk actions** + **bump**
+6. **Column-header sorting**, **Settings** dialog, **autocomplete**
 
 See [ROADMAP.md](ROADMAP.md) for sequencing.

@@ -433,6 +433,33 @@ function openModal(task) {
   document.getElementById("m_title").focus();
 }
 function closeModal() { document.getElementById("overlay").classList.remove("open"); }
+
+/* ---------- import ---------- */
+function openImport() {
+  document.getElementById("imp_text").value = "";
+  document.getElementById("importOverlay").classList.add("open");
+  document.getElementById("imp_text").focus();
+}
+function closeImport() { document.getElementById("importOverlay").classList.remove("open"); }
+async function doImport() {
+  const text = document.getElementById("imp_text").value;
+  if (!text.trim()) { closeImport(); return; }
+  if (LIVE) {
+    try {
+      const r = await api("POST", "/api/import", { text });
+      await loadData();
+      closeImport(); render();
+      showToast(`Imported ${r.added}` + (r.failed ? ` · ${r.failed} skipped` : ""));
+    } catch (e) { showToast("Import failed"); }
+  } else {
+    // sample mode: accept title-only lines so the demo still does something.
+    text.split(/\r?\n/).forEach((line) => {
+      const t = line.split("|")[0].trim();
+      if (t && !t.startsWith("#")) tasks.push({ id: nextId++, title: t, due: "", priority: "M", repeat: "none", group: "", notes: "", done: false, times: 0 });
+    });
+    closeImport(); render(); showToast("Imported (sample mode)");
+  }
+}
 async function saveModal() {
   const title = val("m_title").trim();
   if (!title) return;
@@ -471,7 +498,10 @@ function parseQuickDue(s) {
 async function init() {
   setTheme(currentTheme(), false);
   document.getElementById("themeBtn").onclick = () => setTheme(currentTheme() === "dark" ? "light" : "dark", true);
-  document.getElementById("gearBtn").onclick = (e) => { e.stopPropagation(); const r = e.target.getBoundingClientRect(); popupMenu(r.right - 180, r.bottom + 4, [{ label: "↺  Reset hazard escalation", fn: resetHazard }]); };
+  document.getElementById("gearBtn").onclick = (e) => { e.stopPropagation(); const r = e.target.getBoundingClientRect(); popupMenu(r.right - 190, r.bottom + 4, [
+    { label: "⬆  Import tasks…", fn: openImport },
+    { label: "↺  Reset hazard escalation", fn: resetHazard },
+  ]); };
   document.getElementById("search").oninput = (e) => { state.search = e.target.value; render(); };
   document.getElementById("menuBtn").onclick = () => document.getElementById("sidebar").classList.toggle("open");
   document.getElementById("addBtn").onclick = () => openModal(null);
@@ -488,8 +518,12 @@ async function init() {
   };
   const overlay = document.getElementById("overlay");
   overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+  const impOverlay = document.getElementById("importOverlay");
+  impOverlay.onclick = (e) => { if (e.target === impOverlay) closeImport(); };
+  document.getElementById("imp_cancel").onclick = closeImport;
+  document.getElementById("imp_go").onclick = doImport;
   document.addEventListener("click", closeMenu);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeMenu(); closeModal(); } });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeMenu(); closeModal(); closeImport(); } });
   await loadData();
   render();
 }

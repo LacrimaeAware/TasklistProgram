@@ -171,6 +171,28 @@ Your data includes health/medication and (soon) mood — treat it as sensitive:
 - **Encrypt at rest** (disk/db encryption) and keep **off-site encrypted backups**.
 - **Web push** needs a service worker + VAPID keys — keep the private key secret.
 
+### Sharing & hosting — concrete options (no-cost first)
+The question "how would a friend use this / how do I get it on my phone?" has three
+tiers; pick by how much reach you actually need:
+
+1. **Each person runs their own local copy** (recommended default). Clone + `run_web.bat`
+   (or the desktop app). Free, fully private, separate data per person. This is the
+   answer for "a friend wants to use the app." No infrastructure.
+2. **Self-host from your own computer for remote/phone access** (free, data stays on
+   your PC). Run `tasklistprogram.webserver`, expose it with a **Cloudflare Tunnel**
+   or **Tailscale** for a real HTTPS URL on your phone. Requires your PC be on **and
+   the auth layer** (a tunnel without auth = your data on the public internet).
+   Netlify can't do this — it's static-only (no Python/DB), so it can host the `web/`
+   front-end but must point at a self-hosted/tunneled API. This is the best free path
+   to phone access.
+3. **Multi-user hosted (friend gets their own account).** The big lift: auth **plus
+   per-user data separation (multi-tenancy) plus always-on hosting**. Only worth it
+   if there's real demand; otherwise option 1 is simpler and free.
+
+**Sequencing:** auth → option 2 (free phone access). Multi-tenancy/option 3 later.
+The single-user-self-host vs. multi-user choice determines whether auth is a simple
+shared password or full per-user accounts — decide before building auth.
+
 ## 8. New features: mood tracking & notifications
 
 These fit the self-care theme and the platform plan:

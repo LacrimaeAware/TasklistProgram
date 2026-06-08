@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 from .core import model
 from .core.dates import parse_due_entry, fmt_due_for_store, parse_stored_due, next_due
+from .core.io_import import import_from_string
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
@@ -238,6 +239,14 @@ class Handler(BaseHTTPRequestHandler):
                 count = op_reset_hazard(db)
                 model.save_db(db)
             return self._send_json({"ok": True, "reset": count})
+        if path == "/api/import":
+            text = self._read_json().get("text", "")
+            with _DB_LOCK:
+                db = model.load_db()
+                added, failed, details = import_from_string(text, db, return_details=True)
+                if added:
+                    model.save_db(db)
+            return self._send_json({"added": added, "failed": failed, "details": details})
         if path.startswith("/api/tasks/") and path.endswith("/toggle"):
             return self._mutate_one(path.split("/")[3], op_toggle)
         if path.startswith("/api/tasks/") and path.endswith("/done"):

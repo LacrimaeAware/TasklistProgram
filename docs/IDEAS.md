@@ -6,6 +6,12 @@ A parking lot for ideas — not commitments. When one is picked up, move it to
 notifications) lives in [DESIGN.md](DESIGN.md).
 
 ## Organization & workflow
+- **Task bundles / one-click complete a set** (re-raised 2026-06-08). Instead of
+  checking off magnesium, serotonin support, multivitamin, etc. one by one, treat a
+  set as a single unit you can complete (and maybe add/snooze) in one click. Could be
+  a special "bundle" task whose children are sub-items, or a group-level "complete
+  all" action. Distinct from grouping (which only organizes). Likely the highest-value
+  workflow idea for the owner's supplement/meal stacks.
 - **Smart / fewer groups.** ~20 groups is noisy. Options: sections (group-of-groups),
   collapse rarely-used groups by default, or **auto-group related tasks** by context
   (supplements taken together, a "morning routine"). Maybe ship a few **designed

@@ -4,6 +4,16 @@ Notable changes, newest first. Dates are local. This was a doc-sparse project ea
 on (pre-AI-assist), so entries before 2026-06 are reconstructed from git history and
 are coarser.
 
+## 2026-06-08 — Web import + hosting guidance
+
+- **Import on the web** (⚙ → Import tasks…): paste pipe-format lines, parsed by the
+  same `io_import` core as the desktop, via a new `POST /api/import`. Reports added /
+  skipped counts. Answers "how do I upload tasks?" on the web.
+- **DESIGN.md:** documented concrete **sharing & hosting** options (run-your-own-copy /
+  self-host + Cloudflare Tunnel / multi-user), and why Netlify alone can't host it.
+- **IDEAS.md:** captured the **task-bundle / one-click-complete-a-set** idea
+  (supplement & meal stacks).
+
 ## 2026-06-08 — SQLite migration + backups + documentation system
 
 - **Storage moved to SQLite** (`data/tasks.db`) behind the same `load_db()/save_db()`
